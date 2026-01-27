@@ -1,0 +1,11 @@
+# Entornos virtuales
+everwise/
+venv/
+pyvenv.cfg
+
+# Python
+__pycache__/
+*.pyc
+
+# Sistema
+.DS_Store
