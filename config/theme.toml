@@ -1,0 +1,38 @@
+# ======================================================
+# theme.toml (Creo que esta repetido en .STREAMLIT)
+# EVERWISE · STREAMLIT THEME (EXECUTIVE)
+# Fuente, colores base y layout institucional
+# ======================================================
+
+[theme]
+
+# -------------------------
+# Colores primarios
+# -------------------------
+primaryColor = "#2563eb"        # Azul Everwise (confianza / liderazgo)
+backgroundColor = "#f8fafc"     # Fondo app (muy claro)
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0f172a"
+
+# -------------------------
+# Tipografía
+# -------------------------
+font = "sans serif"
+
+# -------------------------
+# Componentes
+# -------------------------
+base = "light"
+
+# -------------------------
+# Sidebar
+# -------------------------
+sidebarBackgroundColor = "#ffffff"
+sidebarTextColor = "#0f172a"
+
+# -------------------------
+# Estados semánticos
+# -------------------------
+successColor = "#10b981"
+warningColor = "#f59e0b"
+errorColor = "#ef4444"

@@ -1,0 +1,20 @@
+# .streamlit/config.toml
+
+[theme]
+# Configuración visual alineada al Dashboard 2026
+base = "light"
+primaryColor = "#3b82f6"
+backgroundColor = "#F0F4F8"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1e293b"
+font = "sans serif"
+
+[client]
+# Desactiva la navegación automática para usar tus botones personalizados
+showSidebarNavigation = false
+
+[server]
+# Opcional: Optimización de carga
+headless = true
+enableCORS = false
+enableXsrfProtection = false
