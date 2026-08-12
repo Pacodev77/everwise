@@ -3,8 +3,6 @@
 def filtrar_por_campus(df, campus):
     return df[df["campus"] == campus]
 
-# src/logic/kpis.py
-
 # Kpis asistencia (Estudiantes)
 def asistencia_promedio_por_campus(df):
     return (

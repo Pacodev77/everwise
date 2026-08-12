@@ -1,11 +1,20 @@
 # Entornos virtuales
-everwise/
+.venv/
 venv/
+everwise/
 pyvenv.cfg
 
-# Python
+# Python & Cache
 __pycache__/
 *.pyc
+*.pyo
+
+# SQLite WAL & Temp Files
+data/*.db-wal
+data/*.db-shm
 
 # Sistema
 .DS_Store
+.idea/
+.vscode/
+

@@ -1,4 +1,7 @@
+# src/logic/academico_engine.py
+
 import pandas as pd
+# pyrefly: ignore [missing-import]
 import numpy as np
 
 def procesar_log_academico(df_raw: pd.DataFrame):

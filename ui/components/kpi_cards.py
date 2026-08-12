@@ -2,29 +2,12 @@
 
 import streamlit as st
 
-
-def estado_por_valor(valor, umbral_ok, umbral_warning):
-    """
-    Determina el estado visual del KPI según umbrales.
-    
-    - ok: valor >= umbral_ok
-    - warning: valor >= umbral_warning
-    - risk: valor < umbral_warning
-    """
-    if valor >= umbral_ok:
-        return "ok"
-    elif valor >= umbral_warning:
-        return "warning"
-    else:
-        return "risk"
-
-
 def kpi_card(titulo, valor, delta, estado="ok"):
     color = {
-        "ok": "#22c55e",
+        "ok"     : "#22c55e",
         "warning": "#f59e0b",
-        "risk": "#ef4444"
-    }[estado]
+        "risk"   : "#ef4444"
+    }.get(estado, "#22c55e")
 
     st.markdown(
         f"""
@@ -41,3 +24,29 @@ def kpi_card(titulo, valor, delta, estado="ok"):
         """,
         unsafe_allow_html=True
     )
+
+def kpi_card_desde_datos(titulo, valor_num, referencia_num=None, formato="%", umbral_ok=0.80, umbral_warning=0.70):
+    """
+    KPI dinámico que calcula su propio estado según umbrales.
+    valor_num: float (ej: 0.91 para 91%)
+    referencia_num: float opcional para calcular delta
+    """
+    if formato == "%":
+        valor_str = f"{valor_num*100:.1f}%"
+    else:
+        valor_str = f"{valor_num:.1f}"
+
+    if referencia_num is not None:
+        diff = (valor_num - referencia_num) * 100
+        delta_str = f"{diff:+.1f}% vs período anterior"
+    else:
+        delta_str = "Sin referencia previa"
+
+    if valor_num >= umbral_ok:
+        estado = "ok"
+    elif valor_num >= umbral_warning:
+        estado = "warning"
+    else:
+        estado = "risk"
+
+    kpi_card(titulo, valor_str, delta_str, estado)

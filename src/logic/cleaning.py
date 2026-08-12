@@ -36,7 +36,6 @@ def limpiar_desempeno_b1(df_raw):
 
     return df
 
-
 def limpiar_desempeno_b2(df_raw):
     registros = []
     nivel_actual = None
@@ -70,7 +69,6 @@ def limpiar_desempeno_b2(df_raw):
     df = df.drop_duplicates(subset=["campus", "nivel"])
 
     return df
-
 
 def unir_bloques(df_b1, df_b2):
     return pd.concat([df_b1, df_b2], ignore_index=True)

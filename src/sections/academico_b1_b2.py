@@ -1,5 +1,6 @@
 # src/sections/academico_b1_b2.py
 
+# pyrefly: ignore [missing-import]
 import streamlit as st
 from src.logic.narrative import narrativa_bloques
 

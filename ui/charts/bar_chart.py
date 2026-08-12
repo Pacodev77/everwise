@@ -1,4 +1,5 @@
 # ui/charts/bar_chart.py
+
 import altair as alt
 
 def chart_dominio_academico(df_academico):

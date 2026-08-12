@@ -1,7 +1,7 @@
 # src/logic/charts.py
 
+# pyrefly: ignore [missing-import]
 import altair as alt
-
 
 def bar_lenguaje_chart(df_barras):
     """
@@ -27,7 +27,6 @@ def bar_lenguaje_chart(df_barras):
         )
         .properties(height=260)
     )
-
 
 def sparkline_lenguaje(df_futuro, columna="lenguaje"):
     """

@@ -1,5 +1,9 @@
+# ui/components/asistencia_seccion.py
+
+# pyrefly: ignore [missing-import]
 import streamlit as st
 import pandas as pd
+# pyrefly: ignore [missing-import]
 import altair as alt
 from ui.components.asistencia_uploader import render_asistencia_uploader
 
@@ -7,7 +11,6 @@ def render_asistencia_section(sede_actual, real_data=None, mostrar_uploader=Fals
     """
     Renderiza un desglose detallado de asistencia para alumnos (por nivel) y Staff.
     Soporta ingestión de datos reales del Motor de Inteligencia (real_data).
-    Renderiza un desglose detallado de asistencia para alumnos (por nivel) y Staff.
     Diseño adaptado para mantener estética ejecutiva.
     """
     st.markdown("---")
@@ -25,11 +28,18 @@ def render_asistencia_section(sede_actual, real_data=None, mostrar_uploader=Fals
     elif sede_actual == "Nuevo Sur": base_asis = 0.91
     elif sede_actual == "San Agustín": base_asis = 0.93
     
+    staff_desglose = None
+    dias_alumnos = None
+    dias_staff = None
+    
     # Datos de asistencia de alumnos
     if real_data is not None:
         # Inyectando Real Data proveniente de src/logic/asistencia_engine.py
         df_data = real_data["niveles"]
-        staff_asis = real_data["staff"]
+        staff_asis = real_data.get("staff", 0.90)
+        staff_desglose = real_data.get("staff_desglose")
+        dias_alumnos = real_data.get("dias_alumnos")
+        dias_staff = real_data.get("dias_staff")
     else:
         # --- MOCK DATA FALLBACK ---
         if sede_actual == "Global":
@@ -48,6 +58,16 @@ def render_asistencia_section(sede_actual, real_data=None, mostrar_uploader=Fals
             staff_asis = base_asis + 0.05 
             if staff_asis > 0.99: staff_asis = 0.99
         df_data = pd.DataFrame(niveles)
+        
+    # Badges informativos si hay datos de días registrados
+    if dias_alumnos is not None or dias_staff is not None:
+        info_tags = []
+        if dias_alumnos is not None and dias_alumnos > 0:
+            info_tags.append(f"**Días Alumnos:** {int(dias_alumnos)} días")
+        if dias_staff is not None and dias_staff > 0:
+            info_tags.append(f"**Días Colaboradores:** {int(dias_staff)} días")
+        if info_tags:
+            st.caption(" · ".join(info_tags))
     
     # Lógica Dinámica de Semáforo basada en rendimiento
     def get_color(val):
@@ -107,7 +127,6 @@ def render_asistencia_section(sede_actual, real_data=None, mostrar_uploader=Fals
     
     # STAFF / DOCENTES (Separado y diferenciado para cumplir requisito)
     st.markdown("**Personal Docente y Staff**")
-    
     st.info("**Monitor Operativo:** La asistencia de la plantilla laboral se audita de forma independiente para medir operabilidad.")
     
     k1, k2 = st.columns([1, 2])
@@ -119,16 +138,32 @@ def render_asistencia_section(sede_actual, real_data=None, mostrar_uploader=Fals
             delta_color="normal"
         )
     with k2:
-        df_staff = pd.DataFrame([{"Rol": "Plantilla Laboral", "Valor": staff_asis}])
-        chart_staff = alt.Chart(df_staff).mark_bar(
-            cornerRadius=4, 
-            color="#8b5cf6", # Morado distintivo para separar visualmente del semáforo de alumnos
-            size=30
-        ).encode(
-            x=alt.X('Valor:Q', scale=alt.Scale(domain=[0, 1]), title=None, axis=alt.Axis(format='%')),
-            y=alt.Y('Rol:N', title=None, axis=alt.Axis(labels=False, ticks=False)),
-            tooltip=[alt.Tooltip('Valor:Q', format='.1%', title='Operatividad')]
-        ).properties(height=70).configure_view(stroke='transparent')
-        st.altair_chart(chart_staff, use_container_width=True)
+        if staff_desglose and len(staff_desglose) > 1:
+            df_staff_breakdown = pd.DataFrame([
+                {"Área": k, "Asistencia": v} for k, v in staff_desglose.items()
+            ])
+            chart_staff = alt.Chart(df_staff_breakdown).mark_bar(
+                cornerRadius=4, 
+                color="#8b5cf6",
+                size=22
+            ).encode(
+                x=alt.X('Asistencia:Q', scale=alt.Scale(domain=[0, 1]), title=None, axis=alt.Axis(format='%')),
+                y=alt.Y('Área:N', title=None, sort=None, axis=alt.Axis(labelFontSize=11)),
+                tooltip=[alt.Tooltip('Área:N'), alt.Tooltip('Asistencia:Q', format='.1%', title='Asistencia')]
+            ).properties(height=120).configure_view(stroke='transparent')
+            st.altair_chart(chart_staff, use_container_width=True)
+        else:
+            df_staff = pd.DataFrame([{"Rol": "Plantilla Laboral", "Valor": staff_asis}])
+            chart_staff = alt.Chart(df_staff).mark_bar(
+                cornerRadius=4, 
+                color="#8b5cf6", # Morado distintivo para separar visualmente del semáforo de alumnos
+                size=30
+            ).encode(
+                x=alt.X('Valor:Q', scale=alt.Scale(domain=[0, 1]), title=None, axis=alt.Axis(format='%')),
+                y=alt.Y('Rol:N', title=None, axis=alt.Axis(labels=False, ticks=False)),
+                tooltip=[alt.Tooltip('Valor:Q', format='.1%', title='Operatividad')]
+            ).properties(height=70).configure_view(stroke='transparent')
+            st.altair_chart(chart_staff, use_container_width=True)
         
     st.markdown("<br>", unsafe_allow_html=True)
+

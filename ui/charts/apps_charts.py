@@ -1,3 +1,5 @@
+# ui/charts/apps_charts.py
+
 import altair as alt
 import pandas as pd
 

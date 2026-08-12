@@ -16,7 +16,7 @@ def narrativa_bloques(b1: float, b2: float, materia: str) -> str:
     elif delta > 0:
         return f"Ligera mejora en {materia}, aún sin impacto significativo."
     elif delta == 0:
-        return f"⚖️ Sin cambios relevantes en {materia}."
+        return f"Sin cambios relevantes en {materia}."
     else:
         return f"Retroceso en {materia}. Es necesario revisar la intervención pedagógica."
 
