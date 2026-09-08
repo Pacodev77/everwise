@@ -47,35 +47,76 @@ def procesar_ixl(uploaded_file, target_campus: str = None) -> dict:
     """
     Procesa un archivo IXL (CSV o Excel), soportando archivos únicos multi-campus (School).
     Mapea 'San Agustin Cumbres' -> 'San Agustín', 'Misiones' -> 'Misiones', 'Nuevo Sur' -> 'Nuevo Sur'.
+    Soporta alias flexibles de columnas ('Percentile', 'Overall percentile', 'Grade', 'Grado', 'Overall tier', 'Tier').
     """
     try:
         file_name = getattr(uploaded_file, "name", str(uploaded_file)).lower()
         if file_name.endswith(".xlsx") or file_name.endswith(".xls"):
             df = pd.read_excel(uploaded_file)
         else:
-            df = pd.read_csv(uploaded_file)
+            try:
+                df = pd.read_csv(uploaded_file)
+            except UnicodeDecodeError:
+                if hasattr(uploaded_file, "seek"):
+                    uploaded_file.seek(0)
+                df = pd.read_csv(uploaded_file, encoding="latin1")
+            except Exception:
+                if hasattr(uploaded_file, "seek"):
+                    uploaded_file.seek(0)
+                df = pd.read_csv(uploaded_file, encoding="utf-8-sig")
     except Exception as e:
         return {"error": f"No se pudo leer el archivo IXL: {e}"}
 
     if df.empty:
         return {"error": "El archivo IXL está vacío."}
 
-    # Normalizar nombres de columnas
+    # Normalización de cabeceras (mapping flexible de alias en inglés/español)
+    col_map = {}
     school_col = None
-    for col in df.columns:
-        cl = str(col).lower().strip()
-        if cl in ["school", "escuela", "campus", "sede"]:
-            school_col = col
-            break
 
-    columnas_req = {"Grade", "Overall percentile", "Overall tier"}
+    for col in df.columns:
+        cl = str(col).strip().lower().replace("_", " ").replace("-", " ")
+        cl = cl.encode("ascii", "ignore").decode("utf-8").strip()
+
+        if cl in ["grade", "grado", "grade level", "gradelevel", "student grade"]:
+            col_map[col] = "Grade"
+        elif cl in ["percentile", "overall percentile", "percentil", "overall percentile score", "percentile score", "percentile %"]:
+            col_map[col] = "Overall percentile"
+        elif cl in ["overall tier", "tier", "overall tier level", "tier level", "performance tier", "tier status"]:
+            col_map[col] = "Overall tier"
+        elif cl in ["overall level", "level", "overall score"]:
+            col_map[col] = "Overall level"
+        elif cl in ["school", "escuela", "campus", "sede", "school name"]:
+            col_map[col] = "School"
+            school_col = "School"
+
+    if col_map:
+        df = df.rename(columns=col_map)
+
+    if "School" in df.columns:
+        school_col = "School"
+
+    columnas_req = {"Grade", "Overall percentile"}
     cols_presentes = set(df.columns)
     faltantes = columnas_req - cols_presentes
     if faltantes:
         return {"error": f"Columnas faltantes en IXL: {', '.join(faltantes)}"}
 
-    df["Overall tier"] = df["Overall tier"].fillna("Sin datos")
+    # Limpieza de valores numéricos de percentil
     df["Overall percentile"] = clean_numeric(df["Overall percentile"])
+
+    # Si 'Overall tier' no venía explícito pero tenemos percentil, podemos inferirlo
+    if "Overall tier" not in df.columns or df["Overall tier"].isnull().all():
+        def infer_tier(p):
+            if pd.isna(p): return "Sin datos"
+            if p >= 60: return "Above grade"
+            elif p >= 40: return "On grade"
+            elif p >= 20: return "Below grade"
+            else: return "Far below grade"
+        df["Overall tier"] = df["Overall percentile"].apply(infer_tier)
+    else:
+        # Reemplazar representaciones nulas de IXL como '--', '-', 'N/A' por NaN y luego 'Sin datos'
+        df["Overall tier"] = df["Overall tier"].astype(str).str.strip().replace(["--", "-", "", "N/A", "nan", "None"], np.nan).fillna("Sin datos")
     
     for area in AREAS_MATH:
         col_pct = f"{area} percentile"
@@ -147,18 +188,43 @@ def calcular_por_grado(df: pd.DataFrame) -> pd.DataFrame:
     """Percentil promedio y distribución de tiers por grado."""
     if df.empty:
         return pd.DataFrame()
-    resumen = df.groupby("Grade").agg(
-        total=("Grade", "count"),
+
+    def format_grade(g):
+        g_str = str(g).strip()
+        if g_str.startswith("Grado "):
+            return g_str
+        try:
+            val_f = float(g_str)
+            if val_f.is_integer():
+                return f"Grado {int(val_f)}"
+            return f"Grado {val_f}"
+        except Exception:
+            return f"Grado {g_str}"
+
+    df_calc = df.copy()
+    df_calc["GradeLabel"] = df_calc["Grade"].apply(format_grade)
+
+    resumen = df_calc.groupby("GradeLabel").agg(
+        total=("GradeLabel", "count"),
         percentil_prom=("Overall percentile", "mean"),
         on_or_above=("Overall tier", lambda x: (
             x.isin(["On grade", "Above grade"]).sum()
         ))
-    ).reset_index()
+    ).reset_index().rename(columns={"GradeLabel": "Grade"})
+
     resumen["pct_on_above"] = (
         resumen["on_or_above"] / resumen["total"] * 100
     ).round(1)
-    resumen["percentil_prom"] = resumen["percentil_prom"].round(1)
-    resumen["Grade"] = resumen["Grade"].astype(str).apply(lambda g: g if g.startswith("Grado ") else f"Grado {g}")
+    resumen["percentil_prom"] = resumen["percentil_prom"].fillna(0.0).round(1)
+
+    def grade_sort_key(g):
+        s = str(g).replace("Grado ", "").strip()
+        try:
+            return float(s)
+        except Exception:
+            return 999
+
+    resumen = resumen.sort_values(by="Grade", key=lambda col: col.apply(grade_sort_key))
     return resumen
 
 def calcular_areas(df: pd.DataFrame) -> pd.DataFrame:

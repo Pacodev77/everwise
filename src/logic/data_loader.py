@@ -877,6 +877,9 @@ def save_ixl_diagnostics_data(campus: str, df: pd.DataFrame):
         df_save["ciclo_escolar"] = ciclo
         if "Overall percentile" in df_save.columns:
             df_save["Overall_percentile"] = df_save["Overall percentile"]
+        elif "Percentile" in df_save.columns:
+            df_save["Overall_percentile"] = df_save["Percentile"]
+            
         if "Overall tier" in df_save.columns:
             df_save["Overall_tier"] = df_save["Overall tier"]
             
