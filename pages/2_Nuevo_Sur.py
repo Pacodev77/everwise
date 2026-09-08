@@ -144,7 +144,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Desempeño Académico", 
     "Clima Escolar", 
     "Disciplina", 
-    "Práctica Docente"
+    "Uso de Aplicaciones"
 ])
 
 # ===============================================
@@ -260,10 +260,8 @@ with tab4:
             st.dataframe(df_cartas, hide_index=True, use_container_width=True)
 
 with tab5:
-    st.markdown("### Acompañamiento Docente y Plataformas Digitales")
-    render_adopcion_y_correlacion(sede_actual)
-    st.markdown("---")
-    render_ixl_section(sede_actual)
+    from ui.components.uso_aplicaciones_seccion import render_uso_aplicaciones_section
+    render_uso_aplicaciones_section(sede_actual)
 
 
 # Footer

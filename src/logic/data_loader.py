@@ -811,6 +811,100 @@ def load_disciplina_data():
             
     return df_casos, df_cartas
 
+def save_ixl_diagnostics_data(campus: str, df: pd.DataFrame):
+    """Guarda y consolida el diagnóstico IXL por campus y ciclo escolar en SQLite."""
+    if df is None or df.empty or not campus:
+        return
+    ciclo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ixl_diagnostics'")
+        if not cursor.fetchone():
+            cursor.execute("""
+                CREATE TABLE ixl_diagnostics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campus TEXT,
+                    ciclo_escolar TEXT,
+                    Grade TEXT,
+                    Overall_percentile REAL,
+                    Overall_tier TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        else:
+            try:
+                cursor.execute("ALTER TABLE ixl_diagnostics ADD COLUMN ciclo_escolar TEXT")
+                conn.commit()
+            except Exception:
+                pass
+            
+        cursor.execute("DELETE FROM ixl_diagnostics WHERE campus = ? AND (ciclo_escolar = ? OR ciclo_escolar IS NULL)", (campus, ciclo))
+        conn.commit()
+        
+        df_save = df.copy()
+        df_save["campus"] = campus
+        df_save["ciclo_escolar"] = ciclo
+        if "Overall percentile" in df_save.columns:
+            df_save["Overall_percentile"] = df_save["Overall percentile"]
+        if "Overall tier" in df_save.columns:
+            df_save["Overall_tier"] = df_save["Overall tier"]
+            
+        cols_to_keep = [c for c in ["campus", "ciclo_escolar", "Grade", "Overall_percentile", "Overall_tier"] if c in df_save.columns]
+        df_save[cols_to_keep].to_sql("ixl_diagnostics", conn, if_exists="append", index=False)
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+def save_progrentis_data(campus: str, df: pd.DataFrame):
+    """Guarda datos de uso de Progrentis por campus y ciclo escolar en SQLite."""
+    if df is None or df.empty or not campus:
+        return
+    ciclo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='progrentis_data'")
+        if not cursor.fetchone():
+            cursor.execute("""
+                CREATE TABLE progrentis_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campus TEXT,
+                    ciclo_escolar TEXT,
+                    Alumno TEXT,
+                    Matricula TEXT,
+                    Nivel TEXT,
+                    IPD_Ini REAL,
+                    IPD_Actual REAL,
+                    Mejora_Pct REAL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        else:
+            try:
+                cursor.execute("ALTER TABLE progrentis_data ADD COLUMN ciclo_escolar TEXT")
+                conn.commit()
+            except Exception:
+                pass
+            
+        cursor.execute("DELETE FROM progrentis_data WHERE campus = ? AND (ciclo_escolar = ? OR ciclo_escolar IS NULL)", (campus, ciclo))
+        conn.commit()
+        
+        df_save = df.copy()
+        df_save["campus"] = campus
+        df_save["ciclo_escolar"] = ciclo
+        cols_to_keep = [c for c in ["campus", "ciclo_escolar", "Alumno", "Matricula", "Nivel", "IPD_Ini", "IPD_Actual", "Mejora_Pct"] if c in df_save.columns]
+        df_save[cols_to_keep].to_sql("progrentis_data", conn, if_exists="append", index=False)
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
 def reset_all_system_data():
     """
     Elimina completamente todos los datos almacenados en SQLite y en st.session_state.
@@ -823,7 +917,8 @@ def reset_all_system_data():
             tables = [
                 "academic_data", "attendance_data", "normalized_attendance", 
                 "resumen_diario_nivel", "clima_data", "disciplina_casos", 
-                "disciplina_cartas", "practica_apps_kpis", "practica_correlacion", "audit_logs"
+                "disciplina_cartas", "practica_apps_kpis", "practica_correlacion", 
+                "audit_logs", "ixl_diagnostics", "progrentis_data"
             ]
             for t in tables:
                 cursor.execute(f"DROP TABLE IF EXISTS {t}")

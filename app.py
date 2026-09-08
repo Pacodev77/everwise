@@ -25,9 +25,16 @@ from ui.components.asistencia_seccion import render_asistencia_section
 # ======================================================
 # 1. CONFIGURACIÓN Y ESTILOS
 # ======================================================
+# pyrefly: ignore [missing-import]
+from PIL import Image
+try:
+    favicon = Image.open("assets/letra_blue.png")
+except Exception:
+    favicon = "assets/letra_blue.png"
+
 st.set_page_config(
     page_title="Everwise | Dashboard Global",
-    page_icon="assets/letra_blue.png",
+    page_icon=favicon,
     layout="wide"
 )
 
@@ -83,7 +90,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Desempeño Académico", 
     "Clima Escolar", 
     "Disciplina", 
-    "Práctica Docente",
+    "Uso de Aplicaciones",
     "Auditoría y Bitácora CRM"
 ])
 
@@ -235,19 +242,8 @@ with tab4:
             st.dataframe(df_cartas, hide_index=True, use_container_width=True)
 
 with tab5:
-    st.markdown("### Herramientas y Acompañamiento Docente")
-    if not render_global_uploader("prac", "Práctica Docente"):
-        st.markdown("### Uso de Aplicaciones: IXL vs Progrentis")
-        colr1, colr2 = st.columns(2, gap="large")
-        
-        with colr1:
-            st.markdown("**Métricas de Adopción**")
-            st.altair_chart(chart_comparativa_apps(df_apps_kpis_global), use_container_width=True)
-            st.caption("Cumplimiento porcentual general.")
-        
-        with colr2:
-            st.markdown("**Relación Académica: Práctica vs Resultados (Dominio)**")
-            st.altair_chart(chart_correlacion_practica(df_correlacion), use_container_width=True)
+    from ui.components.uso_aplicaciones_seccion import render_uso_aplicaciones_section
+    render_uso_aplicaciones_section("Global")
 
 with tab6:
     st.markdown("### Bitácora de Auditoría y Trazabilidad CRM")

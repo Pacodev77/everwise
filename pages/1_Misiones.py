@@ -24,9 +24,16 @@ from ui.components.ixl_seccion import render_ixl_section, render_adopcion_y_corr
 from ui.components.academico_seccion import render_academico_section
 
 
+# pyrefly: ignore [missing-import]
+from PIL import Image
+try:
+    favicon = Image.open("assets/letra_blue.png")
+except Exception:
+    favicon = "assets/letra_blue.png"
+
 st.set_page_config(
     page_title="Everwise | Sede Misiones",
-    page_icon="assets/letra-e_blue.png",
+    page_icon=favicon,
     layout="wide"
 )
 
@@ -145,7 +152,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Desempeño Académico", 
     "Clima Escolar", 
     "Disciplina", 
-    "Práctica Docente"
+    "Uso de Aplicaciones"
 ])
 
 # ==============================
@@ -261,10 +268,8 @@ with tab4:
             st.dataframe(df_cartas, hide_index=True, use_container_width=True)
 
 with tab5:
-    st.markdown("### Acompañamiento Docente y Plataformas Digitales")
-    render_adopcion_y_correlacion(sede_actual)
-    st.markdown("---")
-    render_ixl_section(sede_actual)
+    from ui.components.uso_aplicaciones_seccion import render_uso_aplicaciones_section
+    render_uso_aplicaciones_section(sede_actual)
 
 
 # Footer

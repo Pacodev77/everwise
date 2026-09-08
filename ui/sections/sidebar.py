@@ -1,6 +1,62 @@
 # ui/sections/sidebar.py
 # pyrefly: ignore [missing-import]
 import streamlit as st
+import datetime
+
+def obtener_ciclos_escolares_dinamicos():
+    """Genera dinámicamente el ciclo escolar actual y ciclos anteriores/futuros sin harcodeo."""
+    now = datetime.datetime.now()
+    year_start = now.year if now.month >= 8 else now.year - 1
+    
+    # Generar lista de ciclos ordenados descendentemente (futuros primero, luego actual, luego pasados)
+    ciclos = [f"{y} - {y+1}" for y in range(year_start + 2, year_start - 3, -1)]
+    ciclo_actual = f"{year_start} - {year_start + 1}"
+    idx_default = ciclos.index(ciclo_actual) if ciclo_actual in ciclos else 0
+    return ciclos, idx_default
+
+def gestionar_cambio_de_ciclo(nuevo_ciclo: str):
+    """
+    Aísla y gestiona el estado del sistema según el ciclo escolar activo.
+    Guarda el estado del ciclo saliente y restaura el estado del ciclo entrante.
+    """
+    if "cycle_vault" not in st.session_state:
+        st.session_state["cycle_vault"] = {}
+
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo")
+
+    if ciclo_activo is None:
+        st.session_state["ciclo_escolar_activo"] = nuevo_ciclo
+        return
+
+    if ciclo_activo != nuevo_ciclo:
+        prefixes = (
+            "ixl_", "progrentis_", "academico_", "asistencia_", 
+            "clima_", "disciplina_", "practica_", "last_up_", "df_"
+        )
+        keys_modulo = [
+            k for k in list(st.session_state.keys())
+            if k.startswith(prefixes) and k != "cycle_vault"
+        ]
+        
+        # Guardar en el vault el estado del ciclo que sale
+        if ciclo_activo not in st.session_state["cycle_vault"]:
+            st.session_state["cycle_vault"][ciclo_activo] = {}
+            
+        for k in keys_modulo:
+            st.session_state["cycle_vault"][ciclo_activo][k] = st.session_state[k]
+            del st.session_state[k]
+
+        # Actualizar ciclo activo
+        st.session_state["ciclo_escolar_activo"] = nuevo_ciclo
+
+        # Restaurar estado del ciclo que entra si existe
+        if nuevo_ciclo in st.session_state["cycle_vault"]:
+            vault_nuevo = st.session_state["cycle_vault"][nuevo_ciclo]
+            for k, val in vault_nuevo.items():
+                st.session_state[k] = val
+
+        st.cache_data.clear()
+        st.rerun()
 
 def render_sidebar(sede_name=None):
     with st.sidebar:
@@ -48,12 +104,14 @@ def render_sidebar(sede_name=None):
 
         st.write("---")
 
+        ciclos_opciones, idx_default = obtener_ciclos_escolares_dinamicos()
         ciclo_seleccionado = st.selectbox(
             "Ciclo Escolar Activo",
-            options=["2025 - 2026", "2024 - 2025", "2023 - 2024"],
-            index=0
+            options=ciclos_opciones,
+            index=idx_default
         )
-        st.caption("SaaS Core Everwise · v1.0  Enterprise")
+
+        gestionar_cambio_de_ciclo(ciclo_seleccionado)
 
         st.write("---")
         # ── Reset / Reinicio General del Sistema ──
@@ -78,5 +136,14 @@ def render_sidebar(sede_name=None):
         if st.button("Cerrar Sesión", use_container_width=True):
             from src.logic.auth import logout
             logout()
+
+        # ── Footer / Branding Ejecutivo ──
+        st.markdown("""
+            <div style='margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid #cbd5e1; font-size: 0.78rem; color: #64748b; text-align: center; line-height: 1.4;'>
+                <div style='font-weight: 700; color: #94a3b8; font-size: 0.85rem; letter-spacing: 0.3px;'>Everwise® v2.1</div>
+                <div style='margin-top: 2px; font-weight: 500;'>Crafted by <span style='font-weight: 700; color: #94a3b8;'>Paco Ruiz</span></div>
+                <div style='font-size: 0.72rem; color: #94a3b8; margin-top: 4px;'>© 2025–2026.</div>
+            </div>
+        """, unsafe_allow_html=True)
 
         return ciclo_seleccionado

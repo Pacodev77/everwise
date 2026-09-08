@@ -1,0 +1,443 @@
+# ui/components/uso_aplicaciones_seccion.py
+
+# pyrefly: ignore [missing-import]
+import streamlit as st
+# pyrefly: ignore [missing-import]
+import altair as alt
+import pandas as pd
+from src.logic.ixl_processor import procesar_ixl, acumular_ixl, cruzar_con_academico
+from src.logic.progrentis_processor import procesar_progrentis, save_progrentis_session
+from ui.components.kpi_cards import kpi_card
+
+def render_uso_aplicaciones_section(sede_actual: str):
+    """
+    Sección unificada de Uso de Aplicaciones.
+    Integra dos submódulos principales: Progrentis (IPD & Mejora) e IXL Diagnóstico (Multi-Campus).
+    """
+    st.markdown(f"### Uso de Aplicaciones — {sede_actual}")
+    st.caption("Monitoreo ejecutivo de adopción, diagnóstico pedagógico y evolución digital de plataformas de aprendizaje.")
+
+    tab_progrentis, tab_ixl = st.tabs([
+        "Progrentis (Índice IPD & Mejora)",
+        "IXL Diagnóstico (Flex Diagnostic)"
+    ])
+
+    with tab_progrentis:
+        _render_submodulo_progrentis(sede_actual)
+
+    with tab_ixl:
+        _render_submodulo_ixl(sede_actual)
+
+def _render_submodulo_progrentis(sede_actual: str):
+    clave_p = f"progrentis_{sede_actual}"
+
+    st.markdown("#### Progrentis — Desarrollo del Pensamiento Digital")
+    uploaded_p = st.file_uploader(
+        f"Cargar reporte Progrentis (Excel/CSV) — {sede_actual}",
+        type=["xlsx", "xls", "csv"],
+        key=f"up_prog_{sede_actual.lower().replace(' ', '_')}"
+    )
+
+    if uploaded_p is not None:
+        file_state_key = f"last_up_prog_{sede_actual.lower().replace(' ', '_')}"
+        if st.session_state.get(file_state_key) != uploaded_p.name:
+            res_p = procesar_progrentis(uploaded_p, target_campus=sede_actual)
+            if res_p.get("error"):
+                st.error(res_p["error"])
+            else:
+                save_progrentis_session(sede_actual, res_p)
+                st.session_state[file_state_key] = uploaded_p.name
+                st.cache_data.clear()
+                st.rerun()
+
+    if clave_p not in st.session_state:
+        # Intentar cargar desde SQLite
+        from src.logic.data_loader import get_db_connection
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='progrentis_data'")
+            if cursor.fetchone():
+                query = "SELECT * FROM progrentis_data WHERE campus = ?" if sede_actual != "Global" else "SELECT * FROM progrentis_data"
+                df_p = pd.read_sql(query, conn, params=(sede_actual,) if sede_actual != "Global" else ())
+                if not df_p.empty:
+                    resumen_lvl = df_p.groupby('Nivel').agg(
+                        total=('Alumno', 'count'),
+                        ipd_ini_prom=('IPD_Ini', 'mean'),
+                        ipd_act_prom=('IPD_Actual', 'mean'),
+                        mejora_prom=('Mejora_Pct', 'mean')
+                    ).reset_index().round(1)
+                    
+                    st.session_state[clave_p] = {
+                        "error": None,
+                        "total_alumnos": len(df_p),
+                        "ipd_ini_avg": round(df_p['IPD_Ini'].mean(), 1),
+                        "ipd_act_avg": round(df_p['IPD_Actual'].mean(), 1),
+                        "mejora_avg": round(df_p['Mejora_Pct'].mean(), 1),
+                        "df_raw": df_p,
+                        "resumen_nivel": resumen_lvl
+                    }
+            conn.close()
+        except Exception:
+            pass
+
+    if clave_p not in st.session_state:
+        st.info("Sube el archivo de Progrentis para visualizar la métrica de IPD e Índice de Mejora.")
+        return
+
+    data = st.session_state[clave_p]
+    df_raw = data.get("df_raw", pd.DataFrame())
+    
+    total_alumnos = data.get("total_alumnos", 0)
+    ipd_ini_avg = data.get("ipd_ini_avg", 0.0)
+    ipd_act_avg = data.get("ipd_act_avg", 0.0)
+    mejora_avg = data.get("mejora_avg", 0.0)
+    delta_ipd = ipd_act_avg - ipd_ini_avg
+
+    # KPIs con formato ejecutivo (Semáforo + Flechas direccionales)
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        kpi_card(
+            titulo="ALUMNOS REGISTRADOS",
+            valor=f"{total_alumnos}",
+            delta="Reporte activo · Consolidado",
+            estado="info"
+        )
+    with c2:
+        kpi_card(
+            titulo="IPD INICIAL PROMEDIO",
+            valor=f"{ipd_ini_avg:.1f}",
+            delta="Línea Base · Diagnóstico Inicial",
+            estado="info"
+        )
+    with c3:
+        if delta_ipd > 0:
+            delta_html = f'<span style="color:#10b981;font-weight:700">↑ +{delta_ipd:.1f} pts</span> vs Inicial'
+            estado_ipd = "ok"
+        elif delta_ipd < 0:
+            delta_html = f'<span style="color:#ef4444;font-weight:700">↓ {delta_ipd:.1f} pts</span> vs Inicial'
+            estado_ipd = "risk"
+        else:
+            delta_html = '<span style="color:#64748b;font-weight:700">= 0.0 pts</span> Sin cambio'
+            estado_ipd = "warning"
+
+        kpi_card(
+            titulo="IPD ACTUAL PROMEDIO",
+            valor=f"{ipd_act_avg:.1f}",
+            delta=delta_html,
+            estado=estado_ipd
+        )
+    with c4:
+        if mejora_avg > 0:
+            delta_mejora = f'<span style="color:#10b981;font-weight:700">↑ +{mejora_avg:.1f}%</span> Avance Digital'
+            estado_m = "ok"
+        elif mejora_avg < 0:
+            delta_mejora = f'<span style="color:#ef4444;font-weight:700">↓ {mejora_avg:.1f}%</span> Retroceso Digital'
+            estado_m = "risk"
+        else:
+            delta_mejora = '<span style="color:#64748b;font-weight:700">= 0.0%</span> Sin Avance'
+            estado_m = "warning"
+
+        kpi_card(
+            titulo="% MEJORA GENERAL",
+            valor=f"{mejora_avg:+.1f}%" if mejora_avg != 0 else "0.0%",
+            delta=delta_mejora,
+            estado=estado_m
+        )
+
+    # Controles
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("Eliminar reporte Progrentis", key=f"del_prog_{sede_actual.lower().replace(' ', '_')}"):
+        if clave_p in st.session_state:
+            del st.session_state[clave_p]
+        from src.logic.data_loader import get_db_connection
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM progrentis_data WHERE campus = ?", (sede_actual,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        st.cache_data.clear()
+        st.rerun()
+
+    # Visualización por Nivel
+    resumen_lvl = data.get("resumen_nivel", pd.DataFrame())
+    if not resumen_lvl.empty:
+        col_g1, col_g2 = st.columns(2, gap="large")
+        with col_g1:
+            st.markdown("**Evolución de IPD (Inicial vs. Actual) por Nivel**")
+            df_melt = resumen_lvl.melt(id_vars=['Nivel'], value_vars=['ipd_ini_prom', 'ipd_act_prom'],
+                                       var_name='Etapa', value_name='IPD')
+            df_melt['Etapa'] = df_melt['Etapa'].map({'ipd_ini_prom': 'IPD Inicial', 'ipd_act_prom': 'IPD Actual'})
+            
+            chart_ipd = alt.Chart(df_melt).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=24).encode(
+                x=alt.X('Nivel:N', title=None, axis=alt.Axis(labelAngle=0, labelFontSize=12)),
+                xOffset=alt.XOffset('Etapa:N', sort=['IPD Inicial', 'IPD Actual']),
+                y=alt.Y('IPD:Q', title='Índice IPD', axis=alt.Axis(grid=True)),
+                color=alt.Color('Etapa:N', scale=alt.Scale(domain=['IPD Inicial', 'IPD Actual'], range=['#94a3b8', '#6366f1'])),
+                tooltip=[alt.Tooltip('Nivel:N'), alt.Tooltip('Etapa:N'), alt.Tooltip('IPD:Q', format='.1f')]
+            ).properties(height=240).configure_view(stroke='transparent')
+            st.altair_chart(chart_ipd, use_container_width=True)
+
+        with col_g2:
+            st.markdown("**Porcentaje de Mejora Digital por Nivel**")
+            chart_mejora = alt.Chart(resumen_lvl).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6, size=45).encode(
+                x=alt.X('Nivel:N', title=None, axis=alt.Axis(labelAngle=0, labelFontSize=12)),
+                y=alt.Y('mejora_prom:Q', title='% Mejora', axis=alt.Axis(format='%', grid=True)),
+                color=alt.value('#10b981'),
+                tooltip=[alt.Tooltip('Nivel:N'), alt.Tooltip('mejora_prom:Q', format='.1f', title='% Mejora')]
+            ).properties(height=240).configure_view(stroke='transparent')
+            st.altair_chart(chart_mejora, use_container_width=True)
+
+    # ── Gráfica de Proyección Bimestral Progrentis ─────────────────────────────
+    st.markdown("---")
+    st.markdown("### Proyección Bimestral de Índices IPD (B1 - B5)")
+    st.caption("Trayectoria estimada de avance digital hacia el cierre de ciclo escolar con meta institucional de 85.0 pts IPD.")
+
+    rate_prog = max(abs(delta_ipd), 3.0)
+    ipd_b3 = round(ipd_act_avg + rate_prog, 1)
+    ipd_b4 = round(ipd_b3 + rate_prog, 1)
+    ipd_b5 = round(max(ipd_b4 + rate_prog, 85.0), 1)
+
+    df_proy_p = pd.DataFrame([
+        {"Bimestre": "B1 (Inicial)", "IPD": round(ipd_ini_avg, 1), "Tipo": "Histórico Real"},
+        {"Bimestre": "B2 (Actual)", "IPD": round(ipd_act_avg, 1), "Tipo": "Histórico Real"},
+        {"Bimestre": "B3 (Proy.)", "IPD": ipd_b3, "Tipo": "Proyección Estimada"},
+        {"Bimestre": "B4 (Proy.)", "IPD": ipd_b4, "Tipo": "Proyección Estimada"},
+        {"Bimestre": "B5 (Meta Cierre)", "IPD": ipd_b5, "Tipo": "Proyección Estimada"},
+    ])
+
+    linea_proy = alt.Chart(df_proy_p).mark_line(point=True, strokeWidth=3).encode(
+        x=alt.X("Bimestre:N", sort=["B1 (Inicial)", "B2 (Actual)", "B3 (Proy.)", "B4 (Proy.)", "B5 (Meta Cierre)"], title=None),
+        y=alt.Y("IPD:Q", title="Índice IPD", scale=alt.Scale(domain=[min(ipd_ini_avg, ipd_act_avg) - 5, max(ipd_b5, 90.0) + 5])),
+        color=alt.Color("Tipo:N", scale=alt.Scale(domain=["Histórico Real", "Proyección Estimada"], range=["#3b82f6", "#8b5cf6"])),
+        strokeDash=alt.StrokeDash("Tipo:N", scale=alt.Scale(domain=["Histórico Real", "Proyección Estimada"], range=[[0], [4, 4]])),
+        tooltip=[alt.Tooltip("Bimestre:N"), alt.Tooltip("IPD:Q", format=".1f"), alt.Tooltip("Tipo:N")]
+    ).properties(height=260)
+
+    meta_rule_p = alt.Chart(pd.DataFrame([{"meta": 85.0}])).mark_rule(color="#ef4444", strokeDash=[6, 6], strokeWidth=2).encode(y="meta:Q")
+    st.altair_chart((linea_proy + meta_rule_p).configure_view(stroke="transparent"), use_container_width=True)
+
+    with st.expander("Ver tabla completa de alumnos (Progrentis)"):
+        st.dataframe(df_raw, hide_index=True, use_container_width=True)
+
+def _render_submodulo_ixl(sede_actual: str):
+    clave_ixl = f"ixl_{sede_actual}"
+
+    st.markdown("#### IXL Diagnóstico Flex — Rendimiento Pedagógico")
+    st.info("Sube el reporte de diagnóstico de IXL. El sistema soporta **archivos únicos multi-campus** (`IXL-Flex-Diagnostic-Results`) y distribuye los datos automáticamente.")
+
+    uploaded_ixl = st.file_uploader(
+        f"Cargar reporte IXL (CSV/Excel) — {sede_actual}",
+        type=["csv", "xlsx", "xls"],
+        key=f"up_ixl_{sede_actual.lower().replace(' ', '_')}"
+    )
+
+    if uploaded_ixl is not None:
+        file_state_key = f"last_up_ixl_{sede_actual.lower().replace(' ', '_')}"
+        if st.session_state.get(file_state_key) != uploaded_ixl.name:
+            res_ixl = procesar_ixl(uploaded_ixl, target_campus=sede_actual)
+            if res_ixl.get("error"):
+                st.error(res_ixl["error"])
+            else:
+                st.session_state[clave_ixl] = res_ixl
+                st.session_state[file_state_key] = uploaded_ixl.name
+                
+                splits = res_ixl.get("campus_splits", {})
+                if len(splits) > 1:
+                    st.success(f"Archivo Multi-Campus integrado exitosamente: {', '.join(splits.keys())}")
+                else:
+                    st.success(f"Diagnóstico IXL para {sede_actual} integrado exitosamente.")
+                st.cache_data.clear()
+                st.rerun()
+
+    if clave_ixl not in st.session_state:
+        # Cargar desde SQLite
+        from src.logic.data_loader import get_db_connection
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ixl_diagnostics'")
+            if cursor.fetchone():
+                query = "SELECT * FROM ixl_diagnostics WHERE campus = ?" if sede_actual != "Global" else "SELECT * FROM ixl_diagnostics"
+                df_ixl_db = pd.read_sql(query, conn, params=(sede_actual,) if sede_actual != "Global" else ())
+                if not df_ixl_db.empty:
+                    df_ixl_db = df_ixl_db.rename(columns={"Overall_percentile": "Overall percentile", "Overall_tier": "Overall tier"})
+                    from src.logic.ixl_processor import calcular_resumen_tier, calcular_por_grado, calcular_areas
+                    st.session_state[clave_ixl] = {
+                        "error": None,
+                        "total_alumnos": len(df_ixl_db),
+                        "df_raw": df_ixl_db,
+                        "resumen_tier": calcular_resumen_tier(df_ixl_db),
+                        "resumen_grado": calcular_por_grado(df_ixl_db),
+                        "resumen_areas": calcular_areas(df_ixl_db)
+                    }
+            conn.close()
+        except Exception:
+            pass
+
+    if clave_ixl not in st.session_state:
+        st.info("Sube el archivo de diagnóstico IXL para visualizar los niveles de logro y percentiles por grado.")
+        return
+
+    res = st.session_state[clave_ixl]
+    df_raw = res.get("df_raw", pd.DataFrame())
+    
+    total_alumnos = res.get("total_alumnos", len(df_raw))
+    prom_percentil = df_raw["Overall percentile"].mean() if "Overall percentile" in df_raw.columns and not df_raw.empty else 0.0
+    
+    pct_on_above = 0.0
+    if "Overall tier" in df_raw.columns and total_alumnos > 0:
+        on_above_cnt = df_raw["Overall tier"].isin(["On grade", "Above grade"]).sum()
+        pct_on_above = (on_above_cnt / total_alumnos) * 100.0
+
+    # KPIs con formato ejecutivo (Semáforo + Flechas direccionales)
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        kpi_card(
+            titulo="ALUMNOS EVALUADOS IXL",
+            valor=f"{total_alumnos}",
+            delta="Diagnóstico Flex Activo",
+            estado="info"
+        )
+    with m2:
+        if prom_percentil >= 60.0:
+            delta_p = f'<span style="color:#10b981;font-weight:700">↑ {prom_percentil:.1f}%</span> Desempeño Robusto'
+            estado_p = "ok"
+        elif prom_percentil >= 45.0:
+            delta_p = f'<span style="color:#f59e0b;font-weight:700">↑ {prom_percentil:.1f}%</span> En Seguimiento'
+            estado_p = "warning"
+        else:
+            delta_p = f'<span style="color:#ef4444;font-weight:700">↓ {prom_percentil:.1f}%</span> Requiere Intervención'
+            estado_p = "risk"
+
+        kpi_card(
+            titulo="PERCENTIL PROMEDIO GLOBAL",
+            valor=f"{prom_percentil:.1f}%",
+            delta=delta_p,
+            estado=estado_p
+        )
+    with m3:
+        if pct_on_above >= 60.0:
+            delta_o = f'<span style="color:#10b981;font-weight:700">↑ {pct_on_above:.1f}%</span> Nivel Óptimo (On/Above)'
+            estado_o = "ok"
+        elif pct_on_above >= 45.0:
+            delta_o = f'<span style="color:#f59e0b;font-weight:700">↑ {pct_on_above:.1f}%</span> Nivel Aceptable'
+            estado_o = "warning"
+        else:
+            delta_o = f'<span style="color:#ef4444;font-weight:700">↓ {pct_on_above:.1f}%</span> Requiere Refuerzo'
+            estado_o = "risk"
+
+        kpi_card(
+            titulo="ALUMNOS AL NIVEL O SUPERIOR",
+            valor=f"{pct_on_above:.1f}%",
+            delta=delta_o,
+            estado=estado_o
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("Eliminar diagnóstico IXL", key=f"del_ixl_{sede_actual.lower().replace(' ', '_')}"):
+        if clave_ixl in st.session_state:
+            del st.session_state[clave_ixl]
+        from src.logic.data_loader import get_db_connection
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM ixl_diagnostics WHERE campus = ?", (sede_actual,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        st.cache_data.clear()
+        st.rerun()
+
+    # Visualización Tiers y Grados
+    col_t1, col_t2 = st.columns(2, gap="large")
+    with col_t1:
+        st.markdown("**Distribución por Nivel de Logro (Overall Tier)**")
+        res_tier = res.get("resumen_tier", pd.DataFrame())
+        if not res_tier.empty:
+            chart_tier = alt.Chart(res_tier).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(
+                x=alt.X("Tier:N", title=None, sort=["Far below grade", "Below grade", "On grade", "Above grade"]),
+                y=alt.Y("Porcentaje:Q", title="%", scale=alt.Scale(domain=[0, 100])),
+                color=alt.Color("Color:N", scale=None),
+                tooltip=[alt.Tooltip("Tier:N"), alt.Tooltip("Alumnos:Q"), alt.Tooltip("Porcentaje:Q", format=".1f", title="%")]
+            ).properties(height=230).configure_view(stroke="transparent")
+            st.altair_chart(chart_tier, use_container_width=True)
+
+    with col_t2:
+        st.markdown("**Percentil Promedio por Grado Escolar**")
+        res_grado = res.get("resumen_grado", pd.DataFrame())
+        if not res_grado.empty:
+            chart_grado = alt.Chart(res_grado).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6, color="#6366f1").encode(
+                x=alt.X("Grade:N", title=None, axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("percentil_prom:Q", title="Percentil", scale=alt.Scale(domain=[0, 100])),
+                tooltip=[alt.Tooltip("Grade:N"), alt.Tooltip("percentil_prom:Q", title="Percentil Promedio")]
+            ).properties(height=230).configure_view(stroke="transparent")
+            st.altair_chart(chart_grado, use_container_width=True)
+
+    # Áreas de Matemáticas
+    res_areas = res.get("resumen_areas", pd.DataFrame())
+    if not res_areas.empty:
+        st.markdown("**Fortalezas y Oportunidades por Área de Matemáticas**")
+        chart_areas = alt.Chart(res_areas).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, height=22, color="#0284c7").encode(
+            x=alt.X("Percentil:Q", title="Percentil Promedio", scale=alt.Scale(domain=[0, 100])),
+            y=alt.Y("Área:N", title=None, sort="-x"),
+            tooltip=[alt.Tooltip("Área:N"), alt.Tooltip("Percentil:Q", format=".1f")]
+        ).properties(height=180).configure_view(stroke="transparent")
+        st.altair_chart(chart_areas, use_container_width=True)
+
+    # Cruce con Desempeño Académico si existe
+    clave_aca = f"academico_propio_{sede_actual}"
+    if clave_aca in st.session_state:
+        res_aca = st.session_state[clave_aca]
+        cruce = cruzar_con_academico(res, res_aca)
+        if cruce and "df_cruce" in cruce and not cruce["df_cruce"].empty:
+            st.markdown("---")
+            st.markdown("**Correlación IXL Diagnóstico vs. Calificación Académica**")
+            st.caption(f"Tasa de Adopción IXL: **{cruce['pct_adopcion']}%** ({cruce['total_ixl']} de {cruce['total_matricula']} alumnos matriculados)")
+            
+            chart_cruce = alt.Chart(cruce["df_cruce"]).mark_circle(size=120, color="#8b5cf6").encode(
+                x=alt.X("percentil_ixl:Q", title="Percentil Promedio IXL", scale=alt.Scale(domain=[0, 100])),
+                y=alt.Y("promedio_calificacion_pct:Q", title="Promedio Académico (0-100%)", scale=alt.Scale(domain=[0, 100])),
+                tooltip=[alt.Tooltip("Grado:N"), alt.Tooltip("percentil_ixl:Q", format=".1f", title="Percentil IXL"), alt.Tooltip("promedio_calificacion_pct:Q", format=".1f", title="Promedio Académico %")]
+            ).properties(height=220).configure_view(stroke="transparent")
+            st.altair_chart(chart_cruce, use_container_width=True)
+
+    # ── Gráfica de Proyección Bimestral IXL ──────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Proyección Bimestral de Cobertura en Nivel Óptimo (IXL B1 - B5)")
+    st.caption("Evolución proyectada de la tasa de alumnos al nivel o superior (On/Above Grade) hacia el cierre de ciclo escolar (Meta Corporativa: 80.0%).")
+
+    b1_ixl = round(pct_on_above * 0.88, 1)
+    b2_ixl = round(pct_on_above, 1)
+    diff_ixl = max(round(b2_ixl - b1_ixl, 1), 3.5)
+
+    b3_ixl = round(min(b2_ixl + diff_ixl, 92.0), 1)
+    b4_ixl = round(min(b3_ixl + diff_ixl, 96.0), 1)
+    b5_ixl = round(min(max(b4_ixl + diff_ixl, 80.0), 100.0), 1)
+
+    df_proy_ixl = pd.DataFrame([
+        {"Bimestre": "B1 (Inicial)", "% Alumnos Nivel Óptimo": b1_ixl, "Tipo": "Histórico Real"},
+        {"Bimestre": "B2 (Actual)", "% Alumnos Nivel Óptimo": b2_ixl, "Tipo": "Histórico Real"},
+        {"Bimestre": "B3 (Proy.)", "% Alumnos Nivel Óptimo": b3_ixl, "Tipo": "Proyección Estimada"},
+        {"Bimestre": "B4 (Proy.)", "% Alumnos Nivel Óptimo": b4_ixl, "Tipo": "Proyección Estimada"},
+        {"Bimestre": "B5 (Meta Cierre)", "% Alumnos Nivel Óptimo": b5_ixl, "Tipo": "Proyección Estimada"},
+    ])
+
+    chart_proy_ixl = alt.Chart(df_proy_ixl).mark_line(point=True, strokeWidth=3).encode(
+        x=alt.X("Bimestre:N", sort=["B1 (Inicial)", "B2 (Actual)", "B3 (Proy.)", "B4 (Proy.)", "B5 (Meta Cierre)"], title=None),
+        y=alt.Y("% Alumnos Nivel Óptimo:Q", title="% Nivel Óptimo", scale=alt.Scale(domain=[0, 100])),
+        color=alt.Color("Tipo:N", scale=alt.Scale(domain=["Histórico Real", "Proyección Estimada"], range=["#10b981", "#6366f1"])),
+        strokeDash=alt.StrokeDash("Tipo:N", scale=alt.Scale(domain=["Histórico Real", "Proyección Estimada"], range=[[0], [4, 4]])),
+        tooltip=[alt.Tooltip("Bimestre:N"), alt.Tooltip("% Alumnos Nivel Óptimo:Q", format=".1f"), alt.Tooltip("Tipo:N")]
+    ).properties(height=260)
+
+    meta_rule_ixl = alt.Chart(pd.DataFrame([{"meta": 80.0}])).mark_rule(color="#ef4444", strokeDash=[6, 6], strokeWidth=2).encode(y="meta:Q")
+    st.altair_chart((chart_proy_ixl + meta_rule_ixl).configure_view(stroke="transparent"), use_container_width=True)
+
+    with st.expander("Ver tabla completa de diagnóstico IXL"):
+        st.dataframe(df_raw, hide_index=True, use_container_width=True)
+

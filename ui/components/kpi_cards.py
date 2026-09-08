@@ -1,5 +1,6 @@
 # ui/components/kpi_cards.py 
 
+# pyrefly: ignore [missing-import]
 import streamlit as st
 
 def kpi_card(titulo, valor, delta, estado="ok"):
