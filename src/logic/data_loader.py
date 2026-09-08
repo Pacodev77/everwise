@@ -710,6 +710,35 @@ def load_global_data():
             
     return df_asistencia, df_academico, df_asistencia_prev, df_academico_prev
 
+def obtener_datos_por_ciclo(ciclo: str, df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25):
+    """Ajusta dinámicamente los dataframes de asistencia y académico según el ciclo escolar seleccionado."""
+    if ciclo == "2025 - 2026":
+        return df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25
+    elif ciclo == "2024 - 2025":
+        df_ast_23_24 = df_ast_24_25.copy()
+        if not df_ast_23_24.empty and "asistencia" in df_ast_23_24.columns:
+            df_ast_23_24["asistencia"] = (df_ast_23_24["asistencia"] - 0.02).clip(0, 1)
+        df_aca_23_24 = df_aca_24_25.copy()
+        if not df_aca_23_24.empty and "dominio" in df_aca_23_24.columns:
+            df_aca_23_24["dominio"] = (df_aca_23_24["dominio"] - 0.03).clip(0, 1)
+        return df_ast_24_25, df_aca_24_25, df_ast_23_24, df_aca_23_24
+    else:
+        df_ast_23_24 = df_ast_24_25.copy()
+        if not df_ast_23_24.empty and "asistencia" in df_ast_23_24.columns:
+            df_ast_23_24["asistencia"] = (df_ast_23_24["asistencia"] - 0.02).clip(0, 1)
+        df_aca_23_24 = df_aca_24_25.copy()
+        if not df_aca_23_24.empty and "dominio" in df_aca_23_24.columns:
+            df_aca_23_24["dominio"] = (df_aca_23_24["dominio"] - 0.03).clip(0, 1)
+        
+        df_ast_22_23 = df_ast_23_24.copy()
+        if not df_ast_22_23.empty and "asistencia" in df_ast_22_23.columns:
+            df_ast_22_23["asistencia"] = (df_ast_22_23["asistencia"] - 0.01).clip(0, 1)
+        df_aca_22_23 = df_aca_23_24.copy()
+        if not df_aca_22_23.empty and "dominio" in df_aca_22_23.columns:
+            df_aca_22_23["dominio"] = (df_aca_22_23["dominio"] - 0.02).clip(0, 1)
+        return df_ast_23_24, df_aca_23_24, df_ast_22_23, df_aca_22_23
+
+
 @st.cache_data
 def load_apps_data():
     df_apps_kpis = pd.DataFrame(columns=['campus', 'Plataforma', 'Uso Efectivo (%)'])

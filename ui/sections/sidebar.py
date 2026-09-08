@@ -10,9 +10,14 @@ def obtener_ciclos_escolares_dinamicos():
     
     # Generar lista de ciclos ordenados descendentemente (futuros primero, luego actual, luego pasados)
     ciclos = [f"{y} - {y+1}" for y in range(year_start + 2, year_start - 3, -1)]
-    ciclo_actual = f"{year_start} - {year_start + 1}"
-    idx_default = ciclos.index(ciclo_actual) if ciclo_actual in ciclos else 0
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo")
+    if ciclo_activo in ciclos:
+        idx_default = ciclos.index(ciclo_activo)
+    else:
+        ciclo_actual = f"{year_start} - {year_start + 1}"
+        idx_default = ciclos.index(ciclo_actual) if ciclo_actual in ciclos else 0
     return ciclos, idx_default
+
 
 def gestionar_cambio_de_ciclo(nuevo_ciclo: str):
     """

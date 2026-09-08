@@ -13,7 +13,7 @@ from config.campus import CAMPUS
 from ui.components.kpi_cards import kpi_card, kpi_card_desde_datos
 from ui.sections.sidebar import render_sidebar
 from ui.sections.footer import render_footer
-from src.logic.data_loader import load_global_data, load_apps_data, load_academico_bloques, load_clima_heatmap, load_disciplina_data
+from src.logic.data_loader import load_global_data, load_apps_data, load_academico_bloques, load_clima_heatmap, load_disciplina_data, obtener_datos_por_ciclo
 from ui.components.cycle_comparison import render_cycle_comparison
 from ui.charts.apps_charts import chart_comparativa_apps, chart_correlacion_practica
 from ui.charts.nuevos_graficos import chart_academico_bloques, chart_clima_heatmap, chart_clima_barras
@@ -99,26 +99,7 @@ if clave_asis in st.session_state:
     df_asistencia.loc[df_asistencia["campus"] == sede_actual, "staff_asistencia"] = res_ast["staff"]
 
 # Ajuste dinámico de ciclo escolar
-def obtener_datos_por_ciclo(ciclo: str, df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25):
-    if ciclo == "2025 - 2026":
-        return df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25
-    elif ciclo == "2024 - 2025":
-        df_ast_23_24 = df_ast_24_25.copy()
-        df_ast_23_24["asistencia"] = (df_ast_23_24["asistencia"] - 0.02).clip(0, 1)
-        df_aca_23_24 = df_aca_24_25.copy()
-        df_aca_23_24["dominio"] = (df_aca_23_24["dominio"] - 0.03).clip(0, 1)
-        return df_ast_24_25, df_aca_24_25, df_ast_23_24, df_aca_23_24
-    else: # "2023 - 2024"
-        df_ast_23_24 = df_ast_24_25.copy()
-        df_ast_23_24["asistencia"] = (df_ast_23_24["asistencia"] - 0.02).clip(0, 1)
-        df_aca_23_24 = df_aca_24_25.copy()
-        df_aca_23_24["dominio"] = (df_aca_23_24["dominio"] - 0.03).clip(0, 1)
-        
-        df_ast_22_23 = df_ast_23_24.copy()
-        df_ast_22_23["asistencia"] = (df_ast_22_23["asistencia"] - 0.01).clip(0, 1)
-        df_aca_22_23 = df_aca_23_24.copy()
-        df_aca_22_23["dominio"] = (df_aca_22_23["dominio"] - 0.02).clip(0, 1)
-        return df_ast_23_24, df_aca_23_24, df_ast_22_23, df_aca_22_23
+
 
 df_ast_cycle, df_aca_cycle, df_ast_prev_cycle, df_aca_prev_cycle = obtener_datos_por_ciclo(
     ciclo_seleccionado, df_asistencia, df_academico, df_asistencia_prev, df_academico_prev

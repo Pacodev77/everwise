@@ -16,7 +16,8 @@ from src.logic.data_loader import (
     load_clima_heatmap, 
     load_disciplina_data,
     get_recent_audit_logs,
-    procesar_archivo_subido
+    procesar_archivo_subido,
+    obtener_datos_por_ciclo
 )
 from ui.charts.nuevos_graficos import chart_academico_bloques, chart_clima_heatmap, chart_clima_barras
 from ui.components.data_uploader import render_global_uploader
@@ -72,15 +73,19 @@ df_correlacion = st.session_state.get("practica_correlacion", df_correlacion)
 # ======================================================
 
 ciclo_seleccionado = render_sidebar(sede_name=None)
+df_asistencia, df_academico, df_asistencia_prev, df_academico_prev = obtener_datos_por_ciclo(
+    ciclo_seleccionado, df_asistencia, df_academico, df_asistencia_prev, df_academico_prev
+)
 
 # ======================================================
 # 4. CONTENIDO PRINCIPAL
 # ======================================================
 
 # Header
+ciclo_fmt = ciclo_seleccionado.replace(" - ", " · ") if ciclo_seleccionado else "2025 · 2026"
 st.markdown(f"""
     <div class="header-container">
-        <div class="dashboard-title">Resumen Data 2025 · 2026 </div>
+        <div class="dashboard-title">Resumen Data {ciclo_fmt}</div>
         <div class="dashboard-subtitle">Estado académico y operativo consolidado por campus</div>
     </div>
 """, unsafe_allow_html=True)
