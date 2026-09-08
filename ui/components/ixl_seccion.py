@@ -30,12 +30,18 @@ def render_ixl_section(sede_actual: str):
     res = st.session_state[clave]
 
     # ── Barra de reporte activo y botón de eliminación ──────────────
-    col_info, col_del = st.columns([3, 1])
+    col_info, col_del1, col_del2 = st.columns([2, 1, 1])
     with col_info:
         st.caption(f"Reporte IXL activo: **{sede_actual}** ({res['total_alumnos']} alumnos)")
-    with col_del:
-        if st.button("Eliminar reporte", key=f"del_ixl_{sede_actual.lower().replace(' ', '_')}", use_container_width=True):
-            del st.session_state[clave]
+    with col_del1:
+        if st.button("Eliminar reporte", key=f"del_ixl_sec_{sede_actual.lower().replace(' ', '_')}", use_container_width=True):
+            from ui.components.uso_aplicaciones_seccion import eliminar_datos_ixl
+            eliminar_datos_ixl(sede_actual)
+            st.rerun()
+    with col_del2:
+        if st.button("Reiniciar (Todos)", key=f"del_ixl_sec_all_{sede_actual.lower().replace(' ', '_')}", use_container_width=True):
+            from ui.components.uso_aplicaciones_seccion import eliminar_datos_ixl
+            eliminar_datos_ixl("Global")
             st.rerun()
 
     # ── KPIs rápidos ──────────────────────────────────────────────
