@@ -367,6 +367,7 @@ def _render_submodulo_ixl(sede_actual: str):
                 st.rerun()
 
     if clave_ixl not in st.session_state:
+        dfs_to_concat = []
         # Cargar desde SQLite
         from src.logic.data_loader import get_db_connection
         try:
@@ -377,19 +378,32 @@ def _render_submodulo_ixl(sede_actual: str):
                 query = "SELECT * FROM ixl_diagnostics WHERE campus = ?" if sede_actual != "Global" else "SELECT * FROM ixl_diagnostics"
                 df_ixl_db = pd.read_sql(query, conn, params=(sede_actual,) if sede_actual != "Global" else ())
                 if not df_ixl_db.empty:
-                    df_ixl_db = df_ixl_db.rename(columns={"Overall_percentile": "Overall percentile", "Overall_tier": "Overall tier"})
-                    from src.logic.ixl_processor import calcular_resumen_tier, calcular_por_grado, calcular_areas
-                    st.session_state[clave_ixl] = {
-                        "error": None,
-                        "total_alumnos": len(df_ixl_db),
-                        "df_raw": df_ixl_db,
-                        "resumen_tier": calcular_resumen_tier(df_ixl_db),
-                        "resumen_grado": calcular_por_grado(df_ixl_db),
-                        "resumen_areas": calcular_areas(df_ixl_db)
-                    }
+                    dfs_to_concat.append(df_ixl_db)
             conn.close()
         except Exception:
             pass
+
+        # Si es Global y SQLite no tiene registros o falta alguno, revisar session_state
+        if sede_actual == "Global":
+            for c in ["Misiones", "Nuevo Sur", "San Agustín"]:
+                k = f"ixl_{c}"
+                if k in st.session_state and "df_raw" in st.session_state[k]:
+                    dfs_to_concat.append(st.session_state[k]["df_raw"])
+
+        if dfs_to_concat:
+            df_combined = pd.concat(dfs_to_concat, ignore_index=True)
+            if "campus" in df_combined.columns and "Grade" in df_combined.columns:
+                df_combined = df_combined.drop_duplicates(subset=["campus", "Grade", "Overall_percentile", "Overall_tier"], keep="last")
+            df_combined = df_combined.rename(columns={"Overall_percentile": "Overall percentile", "Overall_tier": "Overall tier"})
+            from src.logic.ixl_processor import calcular_resumen_tier, calcular_por_grado, calcular_areas
+            st.session_state[clave_ixl] = {
+                "error": None,
+                "total_alumnos": len(df_combined),
+                "df_raw": df_combined,
+                "resumen_tier": calcular_resumen_tier(df_combined),
+                "resumen_grado": calcular_por_grado(df_combined),
+                "resumen_areas": calcular_areas(df_combined)
+            }
 
     if clave_ixl not in st.session_state:
         st.info("Sube el archivo de diagnóstico IXL para visualizar los niveles de logro y percentiles por grado.")
@@ -427,7 +441,7 @@ def _render_submodulo_ixl(sede_actual: str):
             estado_p = "risk"
 
         kpi_card(
-            titulo="PERCENTIL PROMEDIO GLOBAL",
+            titulo="PERCENTIL PROMEDIO GLOBAL" if sede_actual == "Global" else "PERCENTIL PROMEDIO",
             valor=f"{prom_percentil:.1f}%",
             delta=delta_p,
             estado=estado_p
@@ -450,7 +464,37 @@ def _render_submodulo_ixl(sede_actual: str):
             estado=estado_o
         )
 
+    # ── Comparativa de Diagnóstico IXL por Campus si es Global ──────────────
+    if sede_actual == "Global" and "campus" in df_raw.columns and not df_raw.empty:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("**Comparativa de Diagnóstico IXL por Campus Corporativo**")
+        res_campus = df_raw.groupby("campus").agg(
+            alumnos=("campus", "count"),
+            percentil_prom=("Overall percentile", "mean"),
+            pct_on_above=("Overall tier", lambda x: (x.isin(["On grade", "Above grade"]).sum() / len(x) * 100) if len(x) > 0 else 0)
+        ).reset_index().round(1)
+
+        if not res_campus.empty:
+            col_c1, col_c2 = st.columns(2, gap="large")
+            with col_c1:
+                st.caption("Percentil Promedio IXL por Campus")
+                chart_perc_campus = alt.Chart(res_campus).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6, color="#6366f1").encode(
+                    x=alt.X("campus:N", title=None, axis=alt.Axis(labelAngle=0)),
+                    y=alt.Y("percentil_prom:Q", title="Percentil Promedio", scale=alt.Scale(domain=[0, 100])),
+                    tooltip=[alt.Tooltip("campus:N", title="Campus"), alt.Tooltip("alumnos:Q", title="Alumnos"), alt.Tooltip("percentil_prom:Q", format=".1f", title="Percentil Promedio")]
+                ).properties(height=210).configure_view(stroke="transparent")
+                st.altair_chart(chart_perc_campus, use_container_width=True)
+            with col_c2:
+                st.caption("% Alumnos en Nivel Óptimo (On/Above Grade) por Campus")
+                chart_on_above_campus = alt.Chart(res_campus).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6, color="#10b981").encode(
+                    x=alt.X("campus:N", title=None, axis=alt.Axis(labelAngle=0)),
+                    y=alt.Y("pct_on_above:Q", title="% Nivel Óptimo", scale=alt.Scale(domain=[0, 100])),
+                    tooltip=[alt.Tooltip("campus:N", title="Campus"), alt.Tooltip("alumnos:Q", title="Alumnos"), alt.Tooltip("pct_on_above:Q", format=".1f", title="% Nivel Óptimo")]
+                ).properties(height=210).configure_view(stroke="transparent")
+                st.altair_chart(chart_on_above_campus, use_container_width=True)
+
     # Visualización Tiers y Grados
+    st.markdown("<br>", unsafe_allow_html=True)
     col_t1, col_t2 = st.columns(2, gap="large")
     with col_t1:
         st.markdown("**Distribución por Nivel de Logro (Overall Tier)**")
@@ -503,10 +547,13 @@ def _render_submodulo_ixl(sede_actual: str):
             ).properties(height=220).configure_view(stroke="transparent")
             st.altair_chart(chart_cruce, use_container_width=True)
 
-    # ── Gráfica de Proyección Bimestral IXL ──────────────────────────────────
+    # ── Gráfica de Proyección Bimestral Corporativa IXL ───────────────────────
     st.markdown("---")
-    st.markdown("### Proyección Bimestral de Cobertura en Nivel Óptimo (IXL B1 - B5)")
-    st.caption("Evolución proyectada de la tasa de alumnos al nivel o superior (On/Above Grade) hacia el cierre de ciclo escolar (Meta Corporativa: 80.0%).")
+    titulo_proy = "Proyección Bimestral Corporativa en Nivel Óptimo (IXL B1 - B5)" if sede_actual == "Global" else "Proyección Bimestral de Cobertura en Nivel Óptimo (IXL B1 - B5)"
+    subtitulo_proy = "Trayectoria y proyección estratégica corporativa hacia el cierre de ciclo escolar con meta del 80.0% de la matrícula al nivel o superior (On/Above Grade)." if sede_actual == "Global" else "Evolución proyectada de la tasa de alumnos al nivel o superior (On/Above Grade) hacia el cierre de ciclo escolar (Meta Corporativa: 80.0%)."
+
+    st.markdown(f"### {titulo_proy}")
+    st.caption(subtitulo_proy)
 
     b1_ixl = round(pct_on_above * 0.88, 1)
     b2_ixl = round(pct_on_above, 1)
