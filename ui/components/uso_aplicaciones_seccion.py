@@ -10,82 +10,64 @@ from src.logic.progrentis_processor import procesar_progrentis, save_progrentis_
 from ui.components.kpi_cards import kpi_card
 
 def eliminar_datos_ixl(sede_target: str):
-    """Elimina datos de IXL de SQLite, session_state y cycle_vault para el campus o todos los campus."""
+    """Elimina datos de IXL de SQLite, session_state y cycle_vault estrictamente para el campus indicado."""
+    if not sede_target:
+        return
+        
     from src.logic.data_loader import get_db_connection
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ixl_diagnostics'")
         if cursor.fetchone():
-            if sede_target in ["Global", "TODOS"]:
-                cursor.execute("DELETE FROM ixl_diagnostics")
-            else:
-                cursor.execute("DELETE FROM ixl_diagnostics WHERE campus = ?", (sede_target,))
+            cursor.execute("DELETE FROM ixl_diagnostics WHERE campus = ?", (sede_target,))
             conn.commit()
         conn.close()
     except Exception:
         pass
 
-    if sede_target in ["Global", "TODOS"]:
-        for k in list(st.session_state.keys()):
-            if k.startswith("ixl_") or k.startswith("last_up_ixl_"):
-                del st.session_state[k]
-        if "cycle_vault" in st.session_state:
-            for cycle in st.session_state["cycle_vault"]:
-                for k in list(st.session_state["cycle_vault"][cycle].keys()):
-                    if k.startswith("ixl_") or k.startswith("last_up_ixl_"):
-                        del st.session_state["cycle_vault"][cycle][k]
-    else:
-        slug = sede_target.lower().replace(' ', '_')
-        keys_to_del = [f"ixl_{sede_target}", f"last_up_ixl_{slug}"]
-        for k in keys_to_del:
-            if k in st.session_state:
-                del st.session_state[k]
-        if "cycle_vault" in st.session_state:
-            for cycle in st.session_state["cycle_vault"]:
-                for k in keys_to_del:
-                    if k in st.session_state["cycle_vault"][cycle]:
-                        del st.session_state["cycle_vault"][cycle][k]
+    slug = sede_target.lower().replace(' ', '_')
+    keys_to_del = [f"ixl_{sede_target}", f"last_up_ixl_{slug}"]
+    for k in keys_to_del:
+        if k in st.session_state:
+            del st.session_state[k]
+            
+    if "cycle_vault" in st.session_state:
+        for cycle in st.session_state["cycle_vault"]:
+            for k in keys_to_del:
+                if k in st.session_state["cycle_vault"][cycle]:
+                    del st.session_state["cycle_vault"][cycle][k]
 
     st.cache_data.clear()
 
 def eliminar_datos_progrentis(sede_target: str):
-    """Elimina datos de Progrentis de SQLite, session_state y cycle_vault para el campus o todos los campus."""
+    """Elimina datos de Progrentis de SQLite, session_state y cycle_vault estrictamente para el campus indicado."""
+    if not sede_target:
+        return
+        
     from src.logic.data_loader import get_db_connection
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='progrentis_data'")
         if cursor.fetchone():
-            if sede_target in ["Global", "TODOS"]:
-                cursor.execute("DELETE FROM progrentis_data")
-            else:
-                cursor.execute("DELETE FROM progrentis_data WHERE campus = ?", (sede_target,))
+            cursor.execute("DELETE FROM progrentis_data WHERE campus = ?", (sede_target,))
             conn.commit()
         conn.close()
     except Exception:
         pass
 
-    if sede_target in ["Global", "TODOS"]:
-        for k in list(st.session_state.keys()):
-            if k.startswith("progrentis_") or k.startswith("last_up_prog_"):
-                del st.session_state[k]
-        if "cycle_vault" in st.session_state:
-            for cycle in st.session_state["cycle_vault"]:
-                for k in list(st.session_state["cycle_vault"][cycle].keys()):
-                    if k.startswith("progrentis_") or k.startswith("last_up_prog_"):
-                        del st.session_state["cycle_vault"][cycle][k]
-    else:
-        slug = sede_target.lower().replace(' ', '_')
-        keys_to_del = [f"progrentis_{sede_target}", f"last_up_prog_{slug}"]
-        for k in keys_to_del:
-            if k in st.session_state:
-                del st.session_state[k]
-        if "cycle_vault" in st.session_state:
-            for cycle in st.session_state["cycle_vault"]:
-                for k in keys_to_del:
-                    if k in st.session_state["cycle_vault"][cycle]:
-                        del st.session_state["cycle_vault"][cycle][k]
+    slug = sede_target.lower().replace(' ', '_')
+    keys_to_del = [f"progrentis_{sede_target}", f"last_up_prog_{slug}"]
+    for k in keys_to_del:
+        if k in st.session_state:
+            del st.session_state[k]
+            
+    if "cycle_vault" in st.session_state:
+        for cycle in st.session_state["cycle_vault"]:
+            for k in keys_to_del:
+                if k in st.session_state["cycle_vault"][cycle]:
+                    del st.session_state["cycle_vault"][cycle][k]
 
     st.cache_data.clear()
 
@@ -113,25 +95,36 @@ def _render_submodulo_progrentis(sede_actual: str):
 
     st.markdown("#### Progrentis — Desarrollo del Pensamiento Digital")
 
-    col_up, col_b1, col_b2 = st.columns([2.5, 1.2, 1.3])
-    with col_up:
-        uploaded_p = st.file_uploader(
-            f"Cargar reporte Progrentis (Excel/CSV) — {sede_actual}",
-            type=["xlsx", "xls", "csv"],
-            key=f"up_prog_{sede_actual.lower().replace(' ', '_')}"
-        )
-    with col_b1:
-        st.write("")
-        st.write("")
-        if st.button(f"Borrar Progrentis ({sede_actual})", key=f"btn_del_prog_sede_{sede_actual.lower().replace(' ', '_')}", use_container_width=True):
-            eliminar_datos_progrentis(sede_actual)
-            st.rerun()
-    with col_b2:
-        st.write("")
-        st.write("")
-        if st.button("Reiniciar Progrentis (Todos)", key=f"btn_del_prog_all_{sede_actual.lower().replace(' ', '_')}", use_container_width=True):
-            eliminar_datos_progrentis("Global")
-            st.rerun()
+    if sede_actual != "Global":
+        col_up, col_del = st.columns([3, 1])
+        with col_up:
+            uploaded_p = st.file_uploader(
+                f"Cargar reporte Progrentis (Excel/CSV) — {sede_actual}",
+                type=["xlsx", "xls", "csv"],
+                key=f"up_prog_{sede_actual.lower().replace(' ', '_')}"
+            )
+        with col_del:
+            st.write("")
+            st.write("")
+            if st.button(f"Eliminar archivo ({sede_actual})", key=f"btn_del_prog_sede_{sede_actual.lower().replace(' ', '_')}", use_container_width=True, type="secondary"):
+                eliminar_datos_progrentis(sede_actual)
+                st.rerun()
+    else:
+        col_up, col_sel, col_del = st.columns([2.2, 1.2, 1.0])
+        with col_up:
+            uploaded_p = st.file_uploader(
+                "Cargar reporte Progrentis (Excel/CSV) — Global",
+                type=["xlsx", "xls", "csv"],
+                key="up_prog_global"
+            )
+        with col_sel:
+            sede_del_p = st.selectbox("Campus a eliminar", ["Misiones", "Nuevo Sur", "San Agustín"], key="sel_del_prog_global")
+        with col_del:
+            st.write("")
+            st.write("")
+            if st.button("Eliminar campus", key="btn_del_prog_global_sel", use_container_width=True, type="secondary"):
+                eliminar_datos_progrentis(sede_del_p)
+                st.rerun()
 
     if uploaded_p is not None:
         file_state_key = f"last_up_prog_{sede_actual.lower().replace(' ', '_')}"
@@ -324,25 +317,36 @@ def _render_submodulo_ixl(sede_actual: str):
     st.markdown("#### IXL Diagnóstico Flex — Rendimiento Pedagógico")
     st.info("Sube el reporte de diagnóstico de IXL. El sistema soporta **archivos únicos multi-campus** (`IXL-Flex-Diagnostic-Results`) y distribuye los datos automáticamente.")
 
-    col_up, col_b1, col_b2 = st.columns([2.5, 1.2, 1.3])
-    with col_up:
-        uploaded_ixl = st.file_uploader(
-            f"Cargar reporte IXL (CSV/Excel) — {sede_actual}",
-            type=["csv", "xlsx", "xls"],
-            key=f"up_ixl_{sede_actual.lower().replace(' ', '_')}"
-        )
-    with col_b1:
-        st.write("")
-        st.write("")
-        if st.button(f"Borrar IXL ({sede_actual})", key=f"btn_del_ixl_sede_{sede_actual.lower().replace(' ', '_')}", use_container_width=True):
-            eliminar_datos_ixl(sede_actual)
-            st.rerun()
-    with col_b2:
-        st.write("")
-        st.write("")
-        if st.button("Reiniciar IXL (Todos)", key=f"btn_del_ixl_all_{sede_actual.lower().replace(' ', '_')}", type="secondary", use_container_width=True):
-            eliminar_datos_ixl("Global")
-            st.rerun()
+    if sede_actual != "Global":
+        col_up, col_del = st.columns([3, 1])
+        with col_up:
+            uploaded_ixl = st.file_uploader(
+                f"Cargar reporte IXL (CSV/Excel) — {sede_actual}",
+                type=["csv", "xlsx", "xls"],
+                key=f"up_ixl_{sede_actual.lower().replace(' ', '_')}"
+            )
+        with col_del:
+            st.write("")
+            st.write("")
+            if st.button(f"Eliminar archivo ({sede_actual})", key=f"btn_del_ixl_sede_{sede_actual.lower().replace(' ', '_')}", use_container_width=True, type="secondary"):
+                eliminar_datos_ixl(sede_actual)
+                st.rerun()
+    else:
+        col_up, col_sel, col_del = st.columns([2.2, 1.2, 1.0])
+        with col_up:
+            uploaded_ixl = st.file_uploader(
+                "Cargar reporte IXL (CSV/Excel) — Global",
+                type=["csv", "xlsx", "xls"],
+                key="up_ixl_global"
+            )
+        with col_sel:
+            sede_del_i = st.selectbox("Campus a eliminar", ["Misiones", "Nuevo Sur", "San Agustín"], key="sel_del_ixl_global")
+        with col_del:
+            st.write("")
+            st.write("")
+            if st.button("Eliminar campus", key="btn_del_ixl_global_sel", use_container_width=True, type="secondary"):
+                eliminar_datos_ixl(sede_del_i)
+                st.rerun()
 
     if uploaded_ixl is not None:
         file_state_key = f"last_up_ixl_{sede_actual.lower().replace(' ', '_')}"
