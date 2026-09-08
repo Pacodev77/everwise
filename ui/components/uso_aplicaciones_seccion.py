@@ -138,8 +138,9 @@ def _render_submodulo_progrentis(sede_actual: str):
                 st.cache_data.clear()
                 st.rerun()
 
-    if clave_p not in st.session_state:
-        # Intentar cargar desde SQLite
+    if sede_actual == "Global" or clave_p not in st.session_state:
+        dfs_to_concat_p = []
+        # 1. Cargar desde SQLite
         from src.logic.data_loader import get_db_connection
         try:
             conn = get_db_connection()
@@ -149,27 +150,44 @@ def _render_submodulo_progrentis(sede_actual: str):
                 query = "SELECT * FROM progrentis_data WHERE campus = ?" if sede_actual != "Global" else "SELECT * FROM progrentis_data"
                 df_p = pd.read_sql(query, conn, params=(sede_actual,) if sede_actual != "Global" else ())
                 if not df_p.empty:
-                    resumen_lvl = df_p.groupby('Nivel').agg(
-                        total=('Alumno', 'count'),
-                        ipd_ini_prom=('IPD_Ini', 'mean'),
-                        ipd_act_prom=('IPD_Actual', 'mean'),
-                        mejora_prom=('Mejora_Pct', 'mean')
-                    ).reset_index().round(1)
-                    
-                    st.session_state[clave_p] = {
-                        "error": None,
-                        "total_alumnos": len(df_p),
-                        "ipd_ini_avg": round(df_p['IPD_Ini'].mean(), 1),
-                        "ipd_act_avg": round(df_p['IPD_Actual'].mean(), 1),
-                        "mejora_avg": round(df_p['Mejora_Pct'].mean(), 1),
-                        "df_raw": df_p,
-                        "resumen_nivel": resumen_lvl
-                    }
+                    dfs_to_concat_p.append(df_p)
             conn.close()
         except Exception:
             pass
 
-    if clave_p not in st.session_state:
+        # 2. Revisar session_state por cada campus
+        campuses_p = ["Misiones", "Nuevo Sur", "San Agustín"] if sede_actual == "Global" else [sede_actual]
+        for c in campuses_p:
+            kp = f"progrentis_{c}"
+            if kp in st.session_state and isinstance(st.session_state[kp], dict) and "df_raw" in st.session_state[kp]:
+                df_c_p = st.session_state[kp]["df_raw"]
+                if df_c_p is not None and not df_c_p.empty:
+                    dfs_to_concat_p.append(df_c_p)
+
+        if dfs_to_concat_p:
+            df_p_comb = pd.concat(dfs_to_concat_p, ignore_index=True)
+            dedup_p = [c for c in ["campus", "Matricula", "Alumno", "Nivel"] if c in df_p_comb.columns]
+            if len(dedup_p) >= 2:
+                df_p_comb = df_p_comb.drop_duplicates(subset=dedup_p, keep="last")
+                
+            resumen_lvl = df_p_comb.groupby('Nivel').agg(
+                total=('Alumno', 'count'),
+                ipd_ini_prom=('IPD_Ini', 'mean'),
+                ipd_act_prom=('IPD_Actual', 'mean'),
+                mejora_prom=('Mejora_Pct', 'mean')
+            ).reset_index().round(1)
+            
+            st.session_state[clave_p] = {
+                "error": None,
+                "total_alumnos": len(df_p_comb),
+                "ipd_ini_avg": round(df_p_comb['IPD_Ini'].mean(), 1),
+                "ipd_act_avg": round(df_p_comb['IPD_Actual'].mean(), 1),
+                "mejora_avg": round(df_p_comb['Mejora_Pct'].mean(), 1),
+                "df_raw": df_p_comb,
+                "resumen_nivel": resumen_lvl
+            }
+
+    if clave_p not in st.session_state or st.session_state[clave_p].get("total_alumnos", 0) == 0:
         st.info("Sube el archivo de Progrentis para visualizar la métrica de IPD e Índice de Mejora.")
         return
 
@@ -366,9 +384,9 @@ def _render_submodulo_ixl(sede_actual: str):
                 st.cache_data.clear()
                 st.rerun()
 
-    if clave_ixl not in st.session_state:
+    if sede_actual == "Global" or clave_ixl not in st.session_state:
         dfs_to_concat = []
-        # Cargar desde SQLite
+        # 1. Cargar desde SQLite
         from src.logic.data_loader import get_db_connection
         try:
             conn = get_db_connection()
@@ -383,18 +401,25 @@ def _render_submodulo_ixl(sede_actual: str):
         except Exception:
             pass
 
-        # Si es Global y SQLite no tiene registros o falta alguno, revisar session_state
-        if sede_actual == "Global":
-            for c in ["Misiones", "Nuevo Sur", "San Agustín"]:
-                k = f"ixl_{c}"
-                if k in st.session_state and "df_raw" in st.session_state[k]:
-                    dfs_to_concat.append(st.session_state[k]["df_raw"])
+        # 2. Revisar session_state por cada campus individual
+        campuses_to_check = ["Misiones", "Nuevo Sur", "San Agustín"] if sede_actual == "Global" else [sede_actual]
+        for c in campuses_to_check:
+            k = f"ixl_{c}"
+            if k in st.session_state and isinstance(st.session_state[k], dict) and "df_raw" in st.session_state[k]:
+                df_c = st.session_state[k]["df_raw"]
+                if df_c is not None and not df_c.empty:
+                    dfs_to_concat.append(df_c)
 
         if dfs_to_concat:
             df_combined = pd.concat(dfs_to_concat, ignore_index=True)
-            if "campus" in df_combined.columns and "Grade" in df_combined.columns:
-                df_combined = df_combined.drop_duplicates(subset=["campus", "Grade", "Overall_percentile", "Overall_tier"], keep="last")
             df_combined = df_combined.rename(columns={"Overall_percentile": "Overall percentile", "Overall_tier": "Overall tier"})
+            
+            dedup_keys = [c for c in ["campus", "ID", "Matricula", "First name", "Last name", "Grade"] if c in df_combined.columns]
+            if len(dedup_keys) >= 2:
+                df_combined = df_combined.drop_duplicates(subset=dedup_keys, keep="last")
+            elif "campus" in df_combined.columns and "Grade" in df_combined.columns and "Overall percentile" in df_combined.columns:
+                df_combined = df_combined.drop_duplicates(subset=["campus", "Grade", "Overall percentile"], keep="last")
+
             from src.logic.ixl_processor import calcular_resumen_tier, calcular_por_grado, calcular_areas
             st.session_state[clave_ixl] = {
                 "error": None,
@@ -405,7 +430,7 @@ def _render_submodulo_ixl(sede_actual: str):
                 "resumen_areas": calcular_areas(df_combined)
             }
 
-    if clave_ixl not in st.session_state:
+    if clave_ixl not in st.session_state or st.session_state[clave_ixl].get("total_alumnos", 0) == 0:
         st.info("Sube el archivo de diagnóstico IXL para visualizar los niveles de logro y percentiles por grado.")
         return
 
