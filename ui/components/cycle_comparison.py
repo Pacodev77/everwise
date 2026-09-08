@@ -18,7 +18,7 @@ def render_cycle_comparison(df_asistencia_actual, df_academico_actual,
                              sede_actual: str | None = None):
     st.markdown("---")
     st.markdown("### Análisis Histórico y Plan de Acción Ejecutivo")
-    st.caption("Comparativa de Dominio Académico por Bimestre")
+    st.caption("Comparativa de Dominio Académico por Bimestre (Promedio GPA %)")
 
     # ── Leer historial real acumulado ───────────────────────────────
     if sede_actual == "Global":
@@ -50,17 +50,8 @@ def render_cycle_comparison(df_asistencia_actual, df_academico_actual,
         df_chart = pd.DataFrame(filas)
         st.caption(f"Bimestres con datos reales: {', '.join(historial.keys())}")
     else:
-        # Fallback simulado mientras no hay archivos subidos
-        df_actual = pd.merge(df_asistencia_actual, df_academico_actual, on="campus")
-        avg_dominio = df_actual["dominio"].mean()
-        df_chart = pd.DataFrame([
-            {"Bimestre": "Bimestre 1", "Dominio": avg_dominio - 0.08, "Color": "#94a3b8", "Tipo": "Simulado"},
-            {"Bimestre": "Bimestre 2", "Dominio": avg_dominio - 0.04, "Color": "#60a5fa", "Tipo": "Simulado"},
-            {"Bimestre": "Bimestre 3", "Dominio": avg_dominio,        "Color": "#3b82f6", "Tipo": "Simulado"},
-            {"Bimestre": "Bimestre 4", "Dominio": avg_dominio + 0.02, "Color": "#2563eb", "Tipo": "Simulado"},
-            {"Bimestre": "Bimestre 5", "Dominio": avg_dominio + 0.05, "Color": "#1d4ed8", "Tipo": "Simulado"},
-        ])
-        st.caption("Mostrando proyección estimada. Sube archivos por bimestre para ver datos reales.")
+        st.info("Sin datos históricos registrados. Sube archivos de calificaciones por bimestre para habilitar esta comparativa.")
+        return
 
     # ── Gráfica con color por bimestre ──────────────────────────────
     chart = alt.Chart(df_chart).mark_bar(
@@ -74,7 +65,7 @@ def render_cycle_comparison(df_asistencia_actual, df_academico_actual,
         color=alt.Color("Color:N", scale=None),  # usa el color directo del DataFrame
         tooltip=[
             alt.Tooltip("Bimestre:O"),
-            alt.Tooltip("Dominio:Q", format=".1%", title="Dominio"),
+            alt.Tooltip("Dominio:Q", format=".1%", title="Dominio Académico (GPA)"),
             alt.Tooltip("Tipo:N", title="Fuente")
         ]
     ).properties(height=260).configure_view(stroke="transparent")
@@ -82,9 +73,13 @@ def render_cycle_comparison(df_asistencia_actual, df_academico_actual,
     st.altair_chart(chart, use_container_width=True)
 
     # ── Retrospectiva ────────────────────────────────────────────────
-    df_actual_ret = pd.merge(df_asistencia_actual, df_academico_actual, on="campus")
-    df_previo_ret = pd.merge(df_asistencia_previo, df_academico_previo, on="campus")
-    recomendaciones = generar_recomendaciones_ciclo(df_actual_ret, df_previo_ret)
+    df_actual_ret = df_academico_actual if df_asistencia_actual.empty else (
+        pd.merge(df_asistencia_actual, df_academico_actual, on="campus") if not df_academico_actual.empty else df_asistencia_actual
+    )
+    df_previo_ret = df_academico_previo if df_asistencia_previo.empty else (
+        pd.merge(df_asistencia_previo, df_academico_previo, on="campus") if not df_academico_previo.empty else df_asistencia_previo
+    )
+    recomendaciones = generar_recomendaciones_ciclo(df_actual_ret, df_previo_ret, sede_actual=sede_actual)
 
     st.markdown("---")
     st.markdown("#### Retrospectiva")

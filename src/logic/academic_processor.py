@@ -131,10 +131,8 @@ def _inferir_nivel_fila(row, sheet_name: str, file_name: str) -> str:
             return "Preescolar"
         elif any(x in n_str for x in ["pri", "elem", "primary", "primaria"]):
             return "Primaria"
-        elif any(x in n_str for x in ["sec", "mid", "middle", "secundaria"]):
+        elif any(x in n_str for x in ["sec", "mid", "middle", "secundaria", "prep", "high", "bach"]):
             return "Secundaria"
-        elif any(x in n_str for x in ["prep", "high", "bach"]):
-            return "Preparatoria"
 
     # 2. Si el nombre de la pestaña no es genérico ("Sheet1", "Hoja1", etc.)
     s_lower = str(sheet_name).lower().strip()
@@ -145,10 +143,8 @@ def _inferir_nivel_fila(row, sheet_name: str, file_name: str) -> str:
             return "Preescolar"
         elif any(x in s_lower for x in ["pri", "elem", "primary", "primaria"]):
             return "Primaria"
-        elif any(x in s_lower for x in ["sec", "mid", "middle", "secundaria"]):
+        elif any(x in s_lower for x in ["sec", "mid", "middle", "secundaria", "prep", "high", "bach"]):
             return "Secundaria"
-        elif any(x in s_lower for x in ["prep", "high", "bach"]):
-            return "Preparatoria"
 
     # 3. Inferir desde Grado_Col si existe
     if "Grado_Col" in row and pd.notna(row["Grado_Col"]):
@@ -159,8 +155,7 @@ def _inferir_nivel_fila(row, sheet_name: str, file_name: str) -> str:
         if num_m:
             g_num = int(num_m.group(1))
             if 1 <= g_num <= 6: return "Primaria"
-            elif 7 <= g_num <= 9: return "Secundaria"
-            elif 10 <= g_num <= 12: return "Preparatoria"
+            elif 7 <= g_num <= 12: return "Secundaria"
 
     # 4. Inferir desde Grupo (ej. 1A..6B -> Primaria, 7A..9C / 1S..3S -> Secundaria, K1..K3 -> Preescolar)
     if "Grupo" in row and pd.notna(row["Grupo"]):
@@ -175,8 +170,7 @@ def _inferir_nivel_fila(row, sheet_name: str, file_name: str) -> str:
         if m:
             g_num = int(m.group(1))
             if 1 <= g_num <= 6: return "Primaria"
-            elif 7 <= g_num <= 9: return "Secundaria"
-            elif 10 <= g_num <= 12: return "Preparatoria"
+            elif 7 <= g_num <= 12: return "Secundaria"
 
     # 5. Inferir desde el nombre del archivo
     f_lower = str(file_name).lower()
@@ -340,21 +334,31 @@ def procesar_archivo_academico(uploaded_file, target_campus: str = None) -> dict
     }
 
 
+def calcular_dominio_academico(df: pd.DataFrame) -> float:
+    """Calcula el Dominio Académico Promedio (GPA %) continuo en escala 0.0 a 1.0."""
+    if df is None or df.empty:
+        return 0.0
+    prom_la = float(df["Language Arts"].mean()) if "Language Arts" in df.columns else 0.0
+    prom_math = float(df["Matemáticas"].mean()) if "Matemáticas" in df.columns else 0.0
+    prom_esp = float(df["Español"].mean()) if "Español" in df.columns else 0.0
+    return float(round((prom_la + prom_math + prom_esp) / 3.0 / 10.0, 3))
+
+
 def calcular_kpis_ejecutivos(resultado: dict) -> dict:
     """Extrae los KPIs principales para el Resumen Ejecutivo del campus."""
     df = resultado["df_raw"]
 
-    prom_math = df["Matemáticas"].mean() / 10
-    prom_esp  = df["Español"].mean() / 10
-    prom_la   = df["Language Arts"].mean() / 10
+    prom_math = df["Matemáticas"].mean() / 10.0 if "Matemáticas" in df.columns else 0.0
+    prom_esp  = df["Español"].mean() / 10.0 if "Español" in df.columns else 0.0
+    prom_la   = df["Language Arts"].mean() / 10.0 if "Language Arts" in df.columns else 0.0
 
-    df = df.copy()
-    df["en_desempeno"] = (
-        (df["Language Arts"] >= 8) &
-        (df["Matemáticas"] >= 8) &
-        (df["Español"] >= 8)
+    df_copy = df.copy()
+    df_copy["en_desempeno"] = (
+        (df_copy["Language Arts"] >= 8) &
+        (df_copy["Matemáticas"] >= 8) &
+        (df_copy["Español"] >= 8)
     )
-    pct_desempeno_global = df["en_desempeno"].mean()
+    pct_desempeno_global = df_copy["en_desempeno"].mean()
 
     return {
         "bimestre"           : resultado["bimestre"],
@@ -364,6 +368,7 @@ def calcular_kpis_ejecutivos(resultado: dict) -> dict:
         "prom_español"       : round(prom_esp, 3),
         "prom_language_arts" : round(prom_la, 3),
         "pct_desempeno"      : round(pct_desempeno_global, 3),
+        "dominio_academico"  : calcular_dominio_academico(df),
     }
 
 def acumular_bimestre(sede: str, resultado: dict):
@@ -375,13 +380,7 @@ def acumular_bimestre(sede: str, resultado: dict):
     bimestre = resultado["bimestre"]
     df = resultado["df_raw"]
 
-    promedio_dominio = (
-        df["Language Arts"].mean() +
-        df["Matemáticas"].mean() +
-        df["Español"].mean()
-    ) / 3 / 10
-
-    st.session_state[clave][bimestre] = round(promedio_dominio, 3)
+    st.session_state[clave][bimestre] = calcular_dominio_academico(df)
 
 def calcular_distribucion_desempeno(df: pd.DataFrame) -> pd.DataFrame:
     """Distribución global: cuántos alumnos en cada categoría de desempeño."""

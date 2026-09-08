@@ -25,12 +25,11 @@ def render_asistencia_uploader(sede_actual):
             try:
                 # Leer el archivo con manejo flexible de delimitadores
                 df_raw = None
+                file_input = None
                 if uploaded_file.name.endswith(('.xlsx', '.xls')):
-                    try:
-                        df_raw = pd.read_excel(uploaded_file, header=None)
-                    except Exception:
-                        uploaded_file.seek(0)
-                        df_raw = pd.read_excel(uploaded_file)
+                    uploaded_file.seek(0)
+                    file_input = uploaded_file
+                    df_raw = pd.DataFrame()  # Dummy para pasar validación de lectura
                 else:
                     # CSV / TSV / TXT
                     bytes_data = uploaded_file.getvalue()
@@ -45,13 +44,15 @@ def render_asistencia_uploader(sede_actual):
                                 break
                             except Exception:
                                 pass
+                    file_input = df_raw
                                 
-                if df_raw is None or df_raw.empty:
+                if df_raw is None:
                     st.error("No se pudo leer el archivo. Verifica el formato e intenta nuevamente.")
                 else:
                     # Procesar con el motor inteligente
-                    df_niveles, staff_kpi, extra_info = procesar_log_asistencia(df_raw, sede_actual)
+                    df_niveles, staff_kpi, extra_info = procesar_log_asistencia(file_input, sede_actual)
                     
+                    sedes_afectadas = []
                     if extra_info.get("es_matriz") and extra_info.get("campuses"):
                         # Se detectó una matriz multi-campus
                         campuses_encontrados = list(extra_info["campuses"].keys())
@@ -67,7 +68,7 @@ def render_asistencia_uploader(sede_actual):
                                     "alumnos_counts": c_data.get("alumnos_counts", {}),
                                     "asistencia_counts": c_data.get("asistencia_counts", {})
                                 }
-                                save_attendance_data(c_name, c_data["niveles"], c_data["staff"])
+                                save_attendance_data(c_name, c_data["niveles"], c_data["staff"], df_canonico=c_data.get("df_canonico"), df_resumen=c_data.get("df_resumen"))
                                 sedes_afectadas.append(c_name)
                         
                         if sedes_afectadas:
@@ -78,7 +79,7 @@ def render_asistencia_uploader(sede_actual):
                             )
                         else:
                             st.success("Reporte de asistencia procesado exitosamente.")
-                    elif not df_niveles.empty:
+                    elif not df_niveles.empty or (extra_info.get("df_resumen") is not None and not extra_info["df_resumen"].empty):
                         st.session_state[f"asistencia_data_{sede_actual}"] = {
                             "niveles": df_niveles,
                             "staff": staff_kpi,
@@ -89,10 +90,38 @@ def render_asistencia_uploader(sede_actual):
                             "alumnos_counts": extra_info.get("alumnos_counts", {}),
                             "asistencia_counts": extra_info.get("asistencia_counts", {})
                         }
-                        save_attendance_data(sede_actual, df_niveles, staff_kpi)
+                        save_attendance_data(sede_actual, df_niveles, staff_kpi, df_canonico=extra_info.get("df_canonico"), df_resumen=extra_info.get("df_resumen"))
                         st.success(f"Asistencia de {sede_actual} procesada y guardada exitosamente.")
                     else:
                         st.warning("No se lograron extraer niveles o métricas lógicas de este archivo.")
+                        
+                    # Mostrar reporte de validación interactivo si está disponible
+                    reporte = extra_info.get("reporte_validacion")
+                    if reporte:
+                        st.markdown("### Reporte de Normalización y Validación")
+                        
+                        # Hojas procesadas
+                        st.write("**Hojas Procesadas:**")
+                        for h in reporte["hojas_procesadas"]:
+                            st.success(f"✔️ Hoja **{h['hoja']}** (Firma: {h['firma']}): {h['filas_cargadas']} filas procesadas.")
+                            
+                        # Hojas ignoradas
+                        if reporte["hojas_ignoradas"]:
+                            st.write("**Hojas Ignoradas (Pivot tables o desconocidas):**")
+                            for h in reporte["hojas_ignoradas"]:
+                                st.info(f"ℹ️ Hoja **{h['hoja']}** ignorada: {h['motivo']}")
+                                
+                        # Valores no mapeados
+                        if reporte["valores_no_mapeados"]:
+                            with st.expander("⚠️ Valores de nivel no mapeados (marcardos como SIN_MAPEAR)", expanded=False):
+                                df_unmapped = pd.DataFrame(reporte["valores_no_mapeados"])
+                                st.dataframe(df_unmapped, hide_index=True, use_container_width=True)
+                                
+                        # Filas rechazadas
+                        if reporte["filas_rechazadas"]:
+                            with st.expander("❌ Filas rechazadas por error de parseo (no cargadas)", expanded=False):
+                                df_rejected = pd.DataFrame(reporte["filas_rechazadas"])
+                                st.dataframe(df_rejected, hide_index=True, use_container_width=True)
 
             except Exception as e:
                 st.error(f"Fallo en procesamiento de asistencia: {e}")

@@ -122,10 +122,38 @@ with tab1:
         math_actual, math_delta = 0.0, 0.0
         esp_actual, esp_delta = 0.0, 0.0
         st.warning(f"Error calculando métricas académicas globales: {e}")
+    # Dinámica de asistencia con control de errores
+    try:
+        if not df_asistencia.empty:
+            mean_asis = df_asistencia['asistencia'].mean()
+            val_asis_str = f"{mean_asis*100:.1f}%"
+            
+            if not df_asistencia_prev.empty:
+                mean_prev = df_asistencia_prev['asistencia'].mean()
+                delta_asis = (mean_asis - mean_prev) * 100
+                delta_asis_str = f"{delta_asis:+.1f}% vs mes anterior"
+                estado_kpi = "ok" if delta_asis >= 0 else "warning"
+            else:
+                delta_asis_str = "Reporte activo · Consolidado"
+                estado_kpi = "ok"
+        else:
+            val_asis_str = "Sin datos"
+            delta_asis_str = "Suba un reporte de asistencia"
+            estado_kpi = "warning"
+    except Exception as e:
+        val_asis_str = "N/A"
+        delta_asis_str = f"Error: {e}"
+        estado_kpi = "warning"
+        
+    val_math_str = f"{math_actual*100:.1f}%" if (b_actual != "N/A" and math_actual > 0) else "Sin datos"
+    sub_math_str = f"{math_delta:+.1f}% vs {b_previo}" if (b_actual != "N/A" and math_actual > 0) else "Suba un archivo académico"
     
-    with k1: kpi_card("Asistencia Promedio", "88%", "+2% vs mes anterior", estado="ok")
-    with k2: kpi_card(f"Matemáticas ({b_actual})", f"{math_actual*100:.1f}%", f"{math_delta:+.1f}% vs {b_previo}", estado="ok" if math_delta >= 0 else "warning")
-    with k3: kpi_card(f"Español ({b_actual})", f"{esp_actual*100:.1f}%", f"{esp_delta:+.1f}% vs {b_previo}", estado="ok" if esp_delta >= 0 else "warning")
+    val_esp_str = f"{esp_actual*100:.1f}%" if (b_actual != "N/A" and esp_actual > 0) else "Sin datos"
+    sub_esp_str = f"{esp_delta:+.1f}% vs {b_previo}" if (b_actual != "N/A" and esp_actual > 0) else "Suba un archivo académico"
+
+    with k1: kpi_card("Asistencia Promedio", val_asis_str, delta_asis_str, estado=estado_kpi)
+    with k2: kpi_card(f"Matemáticas ({b_actual})", val_math_str, sub_math_str, estado="ok" if val_math_str != "Sin datos" else "warning")
+    with k3: kpi_card(f"Español ({b_actual})", val_esp_str, sub_esp_str, estado="ok" if val_esp_str != "Sin datos" else "warning")
     
     # AGREGACIÓN TOP-DOWN INVERSA (Consolidando los motores de inteligencia de Campus)
     campus_keys = ["Misiones", "Nuevo Sur", "San Agustín"]
@@ -154,7 +182,7 @@ with tab1:
         else:
             campus_faltantes.append(c)
             
-    if campus_faltantes:
+    if campus_faltantes and niveles_agg:
         st.caption(f"Asistencia usando estimación previa para: {', '.join(campus_faltantes)}")
         
     real_global = None

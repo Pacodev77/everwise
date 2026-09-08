@@ -150,18 +150,30 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 # ==============================
 with tab1:
-    # ── Intentar leer datos reales del archivo subido ──
+    # ── Intentar leer datos reales del archivo subido o SQLite ──
     clave_datos = f"academico_propio_{sede_actual}"
     kpis_reales = None
 
     if clave_datos in st.session_state:
         from src.logic.academic_processor import calcular_kpis_ejecutivos
         kpis_reales = calcular_kpis_ejecutivos(st.session_state[clave_datos])
+    else:
+        from src.logic.data_loader import get_academic_history_catalog
+        catalog = get_academic_history_catalog()
+        if sede_actual in catalog and catalog[sede_actual]:
+            def _sort_b(b):
+                s = str(b).upper().strip()
+                return int(s[1:]) if s.startswith('B') and s[1:].isdigit() else 99
+            latest_b = sorted(catalog[sede_actual].keys(), key=_sort_b)[-1]
+            res_latest = catalog[sede_actual][latest_b]
+            st.session_state[clave_datos] = res_latest
+            from src.logic.academic_processor import calcular_kpis_ejecutivos
+            kpis_reales = calcular_kpis_ejecutivos(res_latest)
 
     k1, k2, k3 = st.columns(3, gap="large")
 
     # 1. Asistencia del campus
-    asis_val = float(df_ast["asistencia"].iloc[0]) if not df_ast.empty else 0.88
+    asis_val = float(df_ast["asistencia"].iloc[0]) if not df_ast.empty else None
 
     # 2. Desempeño y Promedio de Materias
     if kpis_reales:
@@ -171,45 +183,55 @@ with tab1:
         prom_math = kpis_reales["prom_math"] * 10.0
         prom_esp = kpis_reales["prom_español"] * 10.0
         prom_general = (prom_math + prom_esp) / 2.0
+        val_des = f"{pct_desempeno:.1f}%"
+        sub_des = f"Bimestre {bim} · {total_alumnos}"
+        val_prom = f"{prom_general:.1f}/10"
+        sub_prom = f"Math: {prom_math:.1f} · Esp: {prom_esp:.1f}"
     else:
-        # Extraer métricas estándar desde histórico consolidado
-        df_sede_acad = df_acad_hist[df_acad_hist['campus'] == sede_actual] if 'campus' in df_acad_hist.columns else df_acad_hist
-        b_actual = "B1"
+        df_sede_acad = df_acad_hist[df_acad_hist['campus'] == sede_actual] if ('campus' in df_acad_hist.columns and not df_acad_hist.empty) else pd.DataFrame()
         if not df_sede_acad.empty and 'Bloque' in df_sede_acad.columns:
-            b_actual = sorted(df_sede_acad['Bloque'].unique(), key=lambda b: int(str(b)[1:]) if str(b).startswith('B') and str(b)[1:].isdigit() else 99)[0]
+            b_actual = sorted(df_sede_acad['Bloque'].unique(), key=lambda b: int(str(b)[1:]) if str(b).startswith('B') and str(b)[1:].isdigit() else 99)[-1]
             b_row = df_sede_acad[df_sede_acad['Bloque'] == b_actual].iloc[0]
-            prom_math = float(b_row.get('Matemáticas', 0.80)) * 10.0
-            prom_esp = float(b_row.get('Español', 0.85)) * 10.0
-            prom_la = float(b_row.get('Language Arts', 0.80)) * 10.0
+            prom_math = float(b_row.get('Matemáticas', 0.0)) * 10.0
+            prom_esp = float(b_row.get('Español', 0.0)) * 10.0
+            prom_la = float(b_row.get('Language Arts', 0.0)) * 10.0
             prom_general = (prom_math + prom_esp) / 2.0
             pct_desempeno = ((prom_math + prom_esp + prom_la) / 30.0) * 100.0
+            val_des = f"{pct_desempeno:.1f}%"
+            sub_des = f"Bimestre {b_actual} · Matrícula campus"
+            val_prom = f"{prom_general:.1f}/10"
+            sub_prom = f"Math: {prom_math:.1f} · Esp: {prom_esp:.1f}"
+            bim = b_actual
         else:
-            prom_math, prom_esp = 8.0, 8.5
-            prom_general = 8.2
-            pct_desempeno = 78.0
-        bim = b_actual
-        total_alumnos = "Matrícula campus"
+            val_des = "Sin datos"
+            sub_des = "Suba un archivo académico"
+            val_prom = "Sin datos"
+            sub_prom = "Suba un archivo académico"
+            bim = "N/A"
+
+    val_asis = f"{asis_val*100:.1f}%" if asis_val is not None else "Sin datos"
+    sub_asis = "Asistencia consolidada del campus" if asis_val is not None else "Suba un reporte de asistencia"
 
     with k1:
         kpi_card(
             f"Asistencia ({sede_actual})",
-            f"{asis_val*100:.1f}%",
-            "Asistencia consolidada del campus",
-            estado="ok" if asis_val >= 0.85 else "warning"
+            val_asis,
+            sub_asis,
+            estado="ok" if (asis_val is not None and asis_val >= 0.85) else "warning"
         )
     with k2:
         kpi_card(
-            f"Alumnos en Desempeño ({bim})",
-            f"{pct_desempeno:.1f}%",
-            f"Bimestre {bim} · {total_alumnos}",
-            estado="ok" if pct_desempeno >= 70.0 else "warning"
+            f"Alumnos en Desempeño ({bim})" if bim != "N/A" else "Alumnos en Desempeño",
+            val_des,
+            sub_des,
+            estado="ok" if val_des != "Sin datos" else "warning"
         )
     with k3:
         kpi_card(
-            f"Promedio Materias ({bim})",
-            f"{prom_general:.1f}/10",
-            f"Math: {prom_math:.1f} · Esp: {prom_esp:.1f}",
-            estado="ok" if prom_general >= 8.0 else "warning"
+            f"Promedio Materias ({bim})" if bim != "N/A" else "Promedio Materias",
+            val_prom,
+            sub_prom,
+            estado="ok" if val_prom != "Sin datos" else "warning"
         )
 
     render_asistencia_section(sede_actual, mostrar_uploader=True)

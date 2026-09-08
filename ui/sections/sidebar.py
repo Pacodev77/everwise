@@ -56,6 +56,25 @@ def render_sidebar(sede_name=None):
         st.caption("SaaS Core Everwise · v1.0  Enterprise")
 
         st.write("---")
+        # ── Reset / Reinicio General del Sistema ──
+        if st.button("Reiniciar Sistema", use_container_width=True):
+            st.session_state["mostrar_confirmacion_reset"] = True
+
+        if st.session_state.get("mostrar_confirmacion_reset", False):
+            st.error("**ADVERTENCIA DE REINICIO**\n\nSe eliminarán permanentemente todos los archivos cargados, historiales y la base de datos de todos los campus.")
+            col_res1, col_res2 = st.columns(2)
+            with col_res1:
+                if st.button("Sí, borrar todo", type="primary", use_container_width=True, key="btn_confirm_reset_sb"):
+                    from src.logic.data_loader import reset_all_system_data
+                    reset_all_system_data()
+                    st.session_state["mostrar_confirmacion_reset"] = False
+                    st.rerun()
+            with col_res2:
+                if st.button("Cancelar", use_container_width=True, key="btn_cancel_reset_sb"):
+                    st.session_state["mostrar_confirmacion_reset"] = False
+                    st.rerun()
+
+        st.write("---")
         if st.button("Cerrar Sesión", use_container_width=True):
             from src.logic.auth import logout
             logout()

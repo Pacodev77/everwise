@@ -41,8 +41,241 @@ def init_audit_table():
     finally:
         conn.close()
 
-# Inicializar tabla de auditoría al importar
+def init_attendance_tables_conn(conn):
+    """Crea las tablas de asistencia normalizada y resumen diario si no existen."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS normalized_attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campus TEXT,
+            tipo_persona TEXT,
+            matricula TEXT,
+            nombre TEXT,
+            apellidos TEXT,
+            nivel_normalizado TEXT,
+            grado_grupo TEXT,
+            fecha DATE,
+            hora_entrada TEXT,
+            hora_salida TEXT,
+            estatus TEXT,
+            campus_ciclo TEXT,
+            fuente_archivo TEXT,
+            fuente_hoja TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS resumen_diario_nivel (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campus TEXT,
+            fecha DATE,
+            segmento TEXT,
+            nivel TEXT,
+            presentes INTEGER,
+            total INTEGER,
+            tasa_asistencia REAL,
+            fuente_archivo TEXT,
+            fuente_hoja TEXT
+        )
+    """)
+    conn.commit()
+
+def init_attendance_tables():
+    conn = get_db_connection()
+    try:
+        init_attendance_tables_conn(conn)
+    finally:
+        conn.close()
+
+# Inicializar tablas al importar
 init_audit_table()
+init_attendance_tables()
+
+def reconstruct_attendance_state(campus):
+    """Reconstruye el estado completo de asistencia de un campus desde la base de datos."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # 1. Intentar cargar desde normalized_attendance (grano de persona)
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='normalized_attendance'")
+        if cursor.fetchone():
+            df_canon = pd.read_sql(
+                "SELECT * FROM normalized_attendance WHERE campus = ?", 
+                conn, 
+                params=(campus,)
+            )
+            if not df_canon.empty:
+                # Parsear fechas
+                df_canon['fecha'] = pd.to_datetime(df_canon['fecha']).dt.date
+                
+                df_al = df_canon[df_canon['tipo_persona'] == 'alumno']
+                df_staff = df_canon[df_canon['tipo_persona'] == 'colaborador']
+                
+                dias_alumnos = df_al['fecha'].nunique() if not df_al.empty else 0
+                dias_staff = df_staff['fecha'].nunique() if not df_staff.empty else 0
+                
+                levels_list = []
+                has_falta = (df_al['estatus'] == 'Falta').any()
+                
+                niveles_encontrados = list(df_al['nivel_normalizado'].unique())
+                # Asegurar niveles base
+                for x in ['Preescolar', 'Primaria', 'Secundaria']:
+                    if x not in niveles_encontrados:
+                        niveles_encontrados.append(x)
+                        
+                total_pob = 0
+                pob_por_nivel = {}
+                for lvl in niveles_encontrados:
+                    df_lvl = df_al[df_al['nivel_normalizado'] == lvl]
+                    if df_lvl.empty:
+                        pob_por_nivel[lvl] = 0
+                        continue
+                    if has_falta:
+                        pob = df_lvl['matricula'].nunique()
+                    else:
+                        daily = df_lvl.groupby('fecha')['matricula'].nunique()
+                        pob = daily.max() if not daily.empty else 0
+                    pob_por_nivel[lvl] = pob
+                    total_pob += pob
+                    
+                for lvl in niveles_encontrados:
+                    if lvl == 'SIN_MAPEAR' and pob_por_nivel.get(lvl, 0) == 0:
+                        continue
+                    df_lvl = df_al[df_al['nivel_normalizado'] == lvl]
+                    if df_lvl.empty:
+                        asis_rate = 0.0
+                    else:
+                        if has_falta:
+                            total_rows = len(df_lvl)
+                            present_rows = len(df_lvl[df_lvl['estatus'].isin(['Presente', 'Retardo'])])
+                            asis_rate = present_rows / total_rows if total_rows > 0 else 0.0
+                        else:
+                            daily = df_lvl.groupby('fecha')['matricula'].nunique()
+                            max_pob = pob_por_nivel[lvl]
+                            asis_rate = (daily.mean() / max_pob) if max_pob > 0 else 0.0
+                            
+                    distrib = (pob_por_nivel[lvl] / total_pob) if total_pob > 0 else (1.0 / len(niveles_encontrados))
+                    levels_list.append({
+                        'Nivel': lvl,
+                        'Asistencia': round(asis_rate, 4),
+                        'Distribución': round(distrib, 4)
+                    })
+                    
+                df_levels = pd.DataFrame(levels_list)
+                
+                staff_asis = 0.90
+                staff_desglose = {}
+                if not df_staff.empty:
+                    has_falta_staff = (df_staff['estatus'] == 'Falta').any()
+                    if has_falta_staff:
+                        total_s = len(df_staff)
+                        present_s = len(df_staff[df_staff['estatus'].isin(['Presente', 'Retardo'])])
+                        staff_asis = present_s / total_s if total_s > 0 else 0.0
+                    else:
+                        daily_s = df_staff.groupby('fecha')['nombre'].count()
+                        max_s = daily_s.max() if not daily_s.empty else 0
+                        staff_asis = (daily_s.mean() / max_s) if max_s > 0 else 0.0
+                        
+                    for lvl in df_staff['nivel_normalizado'].unique():
+                        df_lvl_s = df_staff[df_staff['nivel_normalizado'] == lvl]
+                        if has_falta_staff:
+                            total_l = len(df_lvl_s)
+                            present_l = len(df_lvl_s[df_lvl_s['estatus'].isin(['Presente', 'Retardo'])])
+                            rate_l = present_l / total_l if total_l > 0 else 0.0
+                        else:
+                            daily_l = df_lvl_s.groupby('fecha')['nombre'].count()
+                            max_l = daily_l.max() if not daily_l.empty else 0
+                            rate_l = (daily_l.mean() / max_l) if max_l > 0 else 0.0
+                        lvl_key = "Staff General" if (pd.isna(lvl) or str(lvl).strip().upper() in ["SIN_MAPEAR", "NONE", "NAN", ""]) else str(lvl).strip()
+                        staff_desglose[lvl_key] = round(rate_l, 4)
+                        
+                return {
+                    "niveles": df_levels,
+                    "staff": float(staff_asis),
+                    "staff_desglose": staff_desglose,
+                    "dias_alumnos": dias_alumnos,
+                    "dias_staff": dias_staff
+                }
+                
+        # 2. Intentar cargar desde resumen_diario_nivel (Firma B)
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resumen_diario_nivel'")
+        if cursor.fetchone():
+            df_res = pd.read_sql(
+                "SELECT * FROM resumen_diario_nivel WHERE campus = ?", 
+                conn, 
+                params=(campus,)
+            )
+            if not df_res.empty:
+                df_res['fecha'] = pd.to_datetime(df_res['fecha']).dt.date
+                df_al = df_res[df_res['segmento'] == 'alumno']
+                df_staff = df_res[df_res['segmento'] == 'colaborador']
+                
+                dias_alumnos = df_al['fecha'].nunique() if not df_al.empty else 0
+                dias_staff = df_staff['fecha'].nunique() if not df_staff.empty else 0
+                
+                levels_list = []
+                if not df_al.empty:
+                    grouped = df_al.groupby('nivel').agg(
+                        Asistencia=('tasa_asistencia', 'mean'),
+                        TotalHC=('total', 'mean')
+                    ).reset_index()
+                    
+                    df_levels_only = grouped[grouped['nivel'] != 'Total']
+                    total_hc = df_levels_only['TotalHC'].sum()
+                    
+                    for _, row in df_levels_only.iterrows():
+                        distrib = (row['TotalHC'] / total_hc) if total_hc > 0 else (1.0 / len(df_levels_only))
+                        levels_list.append({
+                            'Nivel': row['nivel'],
+                            'Asistencia': round(row['Asistencia'], 4),
+                            'Distribución': round(distrib, 4)
+                        })
+                else:
+                    levels_list = [
+                        {"Nivel": "Preescolar", "Asistencia": 0.0, "Distribución": 0.333},
+                        {"Nivel": "Primaria", "Asistencia": 0.0, "Distribución": 0.333},
+                        {"Nivel": "Secundaria", "Asistencia": 0.0, "Distribución": 0.334}
+                    ]
+                df_levels = pd.DataFrame(levels_list)
+                
+                staff_asis = 0.90
+                staff_desglose = {}
+                if not df_staff.empty:
+                    df_total_staff = df_staff[df_staff['nivel'] == 'Total']
+                    if not df_total_staff.empty:
+                        staff_asis = df_total_staff['tasa_asistencia'].mean()
+                    else:
+                        staff_asis = df_staff['tasa_asistencia'].mean()
+                        
+                    df_desglose_staff = df_staff[df_staff['nivel'] != 'Total']
+                    for lvl, grp in df_desglose_staff.groupby('nivel'):
+                        staff_desglose[lvl] = round(grp['tasa_asistencia'].mean(), 4)
+                        
+                return {
+                    "niveles": df_levels,
+                    "staff": float(staff_asis),
+                    "staff_desglose": staff_desglose,
+                    "dias_alumnos": dias_alumnos,
+                    "dias_staff": dias_staff
+                }
+                
+        # 3. Fallback a la tabla heredada
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
+        if cursor.fetchone():
+            df_ast = pd.read_sql("SELECT * FROM attendance_data WHERE campus = ?", conn, params=(campus,))
+            if not df_ast.empty:
+                staff_val = df_ast["staff_asistencia"].iloc[0] if "staff_asistencia" in df_ast.columns else 0.85
+                if pd.isna(staff_val): staff_val = 0.85
+                return {
+                    "niveles": df_ast[["Nivel", "Asistencia", "Distribución"]].copy(),
+                    "staff": float(staff_val)
+                }
+        return None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
 
 def log_audit_event(username: str, action: str, details: str = "", campus: str = None, bimestre: str = None):
     """Registra una acción en la bitácora de auditoría corporativa del CRM."""
@@ -145,18 +378,22 @@ def init_session_state():
                                 promedio_dominio = 0.0
                             st.session_state[clave_hist][bim] = round(promedio_dominio, 3)
 
-        # 2. Cargar Asistencia
+        # 2. Cargar Asistencia (desde normalized_attendance o attendance_data)
+        campuses_stored = set()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='normalized_attendance'")
+        if cursor.fetchone():
+            cursor.execute("SELECT DISTINCT campus FROM normalized_attendance")
+            campuses_stored.update([row[0] for row in cursor.fetchall() if row[0]])
+            
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
         if cursor.fetchone():
-            df_ast = pd.read_sql("SELECT * FROM attendance_data", conn)
-            if not df_ast.empty:
-                for campus, group in df_ast.groupby("campus"):
-                    staff_val = group["staff_asistencia"].iloc[0] if "staff_asistencia" in group.columns else 0.85
-                    if pd.isna(staff_val): staff_val = 0.85
-                    st.session_state[f"asistencia_data_{campus}"] = {
-                        "niveles": group[["Nivel", "Asistencia", "Distribución"]].copy(),
-                        "staff": float(staff_val)
-                    }
+            cursor.execute("SELECT DISTINCT campus FROM attendance_data")
+            campuses_stored.update([row[0] for row in cursor.fetchall() if row[0]])
+            
+        for campus in campuses_stored:
+            state_data = reconstruct_attendance_state(campus)
+            if state_data:
+                st.session_state[f"asistencia_data_{campus}"] = state_data
 
         # 3. Cargar Clima Escolar
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='clima_data'")
@@ -305,7 +542,7 @@ def get_academic_history_catalog():
     except Exception:
         return {}
 
-def save_attendance_data(campus, df_niveles, staff_kpi):
+def save_attendance_data(campus, df_niveles, staff_kpi, df_canonico=None, df_resumen=None):
     """Guarda y consolida los datos de asistencia en SQLite."""
     if df_niveles is None or df_niveles.empty or campus == "Desconocido":
         return
@@ -313,6 +550,11 @@ def save_attendance_data(campus, df_niveles, staff_kpi):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
+        
+        # Asegurar inicialización de tablas
+        init_attendance_tables_conn(conn)
+        
+        # 1. Guardar df_niveles en la tabla agregada heredada
         df_to_save = df_niveles.copy()
         df_to_save["campus"] = campus
         df_to_save["staff_asistencia"] = float(staff_kpi) if staff_kpi is not None else 0.85
@@ -324,6 +566,28 @@ def save_attendance_data(campus, df_niveles, staff_kpi):
             
         df_to_save.to_sql("attendance_data", conn, if_exists="append", index=False)
         
+        # 2. Guardar df_canonico en normalized_attendance
+        if df_canonico is not None and not df_canonico.empty:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='normalized_attendance'")
+            if cursor.fetchone():
+                cursor.execute("DELETE FROM normalized_attendance WHERE campus = ?", (campus,))
+                conn.commit()
+            df_canon_save = df_canonico.copy()
+            df_canon_save['fecha'] = df_canon_save['fecha'].astype(str)
+            df_canon_save['hora_entrada'] = df_canon_save['hora_entrada'].apply(lambda x: str(x) if x is not None else None)
+            df_canon_save['hora_salida'] = df_canon_save['hora_salida'].apply(lambda x: str(x) if x is not None else None)
+            df_canon_save.to_sql("normalized_attendance", conn, if_exists="append", index=False)
+            
+        # 3. Guardar df_resumen en resumen_diario_nivel
+        if df_resumen is not None and not df_resumen.empty:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resumen_diario_nivel'")
+            if cursor.fetchone():
+                cursor.execute("DELETE FROM resumen_diario_nivel WHERE campus = ?", (campus,))
+                conn.commit()
+            df_resumen_save = df_resumen.copy()
+            df_resumen_save['fecha'] = df_resumen_save['fecha'].astype(str)
+            df_resumen_save.to_sql("resumen_diario_nivel", conn, if_exists="append", index=False)
+            
         username = st.session_state.get("username", "Sistema") if "username" in st.session_state else "Sistema"
         log_audit_event(username, "CARGA_ASISTENCIA", f"Guardada asistencia staff: {staff_kpi:.1%}", campus)
         st.cache_data.clear()
@@ -331,14 +595,23 @@ def save_attendance_data(campus, df_niveles, staff_kpi):
         conn.close()
 
 def delete_attendance_data(campus):
-    """Elimina los datos de asistencia del campus en SQLite."""
+    """Elimina los datos de asistencia del campus en SQLite y limpia la caché."""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
         if cursor.fetchone():
             cursor.execute("DELETE FROM attendance_data WHERE campus = ?", (campus,))
-            conn.commit()
+            
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='normalized_attendance'")
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM normalized_attendance WHERE campus = ?", (campus,))
+            
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resumen_diario_nivel'")
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM resumen_diario_nivel WHERE campus = ?", (campus,))
+            
+        conn.commit()
         st.cache_data.clear()
     finally:
         conn.close()
@@ -391,44 +664,28 @@ def save_practica_data(df_apps_kpis, df_correlacion):
 
 @st.cache_data
 def load_global_data():
-    """Carga los promedios globales de asistencia y dominio, priorizando la base de datos."""
-    df_asistencia = pd.DataFrame({
-        "campus": ["Misiones", "Nuevo Sur", "San Agustín"],
-        "asistencia": [0.88, 0.94, 0.91]
-    })
-    df_academico = pd.DataFrame({
-        "campus": ["Misiones", "Nuevo Sur", "San Agustín"],
-        "dominio": [0.705, 0.69, 0.735]
-    })
-    
-    # Mock data previo (2024-2025)
-    df_asistencia_prev = pd.DataFrame({
-        "campus": ["Misiones", "Nuevo Sur", "San Agustín"],
-        "asistencia": [0.90, 0.92, 0.89]
-    })
-    df_academico_prev = pd.DataFrame({
-        "campus": ["Misiones", "Nuevo Sur", "San Agustín"],
-        "dominio": [0.65, 0.67, 0.71]
-    })
+    """Carga los promedios globales de asistencia y dominio desde la base de datos."""
+    df_asistencia = pd.DataFrame(columns=["campus", "asistencia"])
+    df_academico = pd.DataFrame(columns=["campus", "dominio"])
+    df_asistencia_prev = pd.DataFrame(columns=["campus", "asistencia"])
+    df_academico_prev = pd.DataFrame(columns=["campus", "dominio"])
     
     if os.path.exists(DB_PATH):
         try:
             conn = sqlite3.connect(DB_PATH)
-            # Carga asistencia
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
             if cursor.fetchone():
                 df_att = pd.read_sql("SELECT campus, Asistencia FROM attendance_data", conn)
                 if not df_att.empty:
                     df_att_grouped = df_att.groupby("campus")["Asistencia"].mean().reset_index()
-                    for _, row in df_att_grouped.iterrows():
-                        df_asistencia.loc[df_asistencia["campus"] == row["campus"], "asistencia"] = row["Asistencia"]
+                    df_asistencia = df_att_grouped.rename(columns={"Asistencia": "asistencia"})
             
-            # Carga académico
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='academic_data'")
             if cursor.fetchone():
                 df_acad_all = pd.read_sql("SELECT campus, bimestre, [Language Arts], [Matemáticas], [Español] FROM academic_data", conn)
                 if not df_acad_all.empty:
+                    rows = []
                     for campus, campus_df in df_acad_all.groupby("campus"):
                         latest_bim = sorted(campus_df["bimestre"].unique())[-1]
                         latest_df = campus_df[campus_df["bimestre"] == latest_bim]
@@ -445,7 +702,8 @@ def load_global_data():
                         ) / 3.0
                         if pd.isna(mean_grade):
                             mean_grade = 0.0
-                        df_academico.loc[df_academico["campus"] == campus, "dominio"] = mean_grade / 10.0
+                        rows.append({"campus": campus, "dominio": mean_grade / 10.0})
+                    df_academico = pd.DataFrame(rows)
             conn.close()
         except Exception:
             pass
@@ -454,31 +712,8 @@ def load_global_data():
 
 @st.cache_data
 def load_apps_data():
-    df_apps_kpis = pd.DataFrame({
-        'campus': ['Misiones', 'Misiones', 'Nuevo Sur', 'Nuevo Sur', 'San Agustín', 'San Agustín'],
-        'Plataforma': ['IXL', 'Progrentis', 'IXL', 'Progrentis', 'IXL', 'Progrentis'],
-        'Uso Efectivo (%)': [0.88, 0.75, 0.92, 0.80, 0.85, 0.70]
-    })
-    
-    # Mock data para correlacion por campus
-    np.random.seed(42)
-    def gen_corr(c_name, offset):
-        p_ixl = np.clip(np.random.normal(0.8+offset, 0.1, 5), 0.4, 1.0)
-        r_ixl = np.clip(p_ixl * 0.9 + np.random.normal(0, 0.05, 5), 0.4, 1.0)
-        p_pro = np.clip(np.random.normal(0.7+offset, 0.1, 5), 0.4, 1.0)
-        r_pro = np.clip(p_pro * 0.85 + np.random.normal(0, 0.05, 5), 0.4, 1.0)
-        return pd.DataFrame({
-            "campus": [c_name]*10,
-            "Grupo": [f"G-{i}" for i in range(1, 6)] * 2,
-            "Plataforma": ["IXL"]*5 + ["Progrentis"]*5,
-            "Práctica (%)": np.concatenate([p_ixl, p_pro]),
-            "Resultado (%)": np.concatenate([r_ixl, r_pro])
-        })
-    df_c1 = gen_corr("Misiones", 0.0)
-    df_c2 = gen_corr("Nuevo Sur", 0.05)
-    df_c3 = gen_corr("San Agustín", -0.05)
-    
-    df_correlacion = pd.concat([df_c1, df_c2, df_c3], ignore_index=True)
+    df_apps_kpis = pd.DataFrame(columns=['campus', 'Plataforma', 'Uso Efectivo (%)'])
+    df_correlacion = pd.DataFrame(columns=["campus", "Grupo", "Plataforma", "Práctica (%)", "Resultado (%)"])
     
     if os.path.exists(DB_PATH):
         try:
@@ -502,14 +737,8 @@ def load_apps_data():
 
 @st.cache_data
 def load_academico_bloques():
-    """Genera comparativa B1-B5, incorporando los datos de la base de datos."""
-    df_mock = pd.DataFrame({
-        "campus": ["Misiones"]*5 + ["Nuevo Sur"]*5 + ["San Agustín"]*5,
-        "Bloque": ["B1", "B2", "B3", "B4", "B5"]*3,
-        "Matemáticas": [0.68, 0.82, 0.85, 0.88, 0.90, 0.67, 0.69, 0.72, 0.76, 0.80, 0.72, 0.76, 0.80, 0.83, 0.86],
-        "Español": [0.75, 0.88, 0.90, 0.92, 0.94, 0.81, 0.85, 0.88, 0.90, 0.92, 0.76, 0.80, 0.85, 0.88, 0.90],
-        "Language Arts": [0.70, 0.80, 0.85, 0.87, 0.89, 0.75, 0.78, 0.82, 0.85, 0.87, 0.70, 0.74, 0.78, 0.82, 0.85]
-    })
+    """Carga comparativa de bloques académicos únicamente si existen en la base de datos."""
+    empty_df = pd.DataFrame(columns=["campus", "Bloque", "Matemáticas", "Español", "Language Arts"])
     
     if os.path.exists(DB_PATH):
         try:
@@ -524,47 +753,22 @@ def load_academico_bloques():
                     df_real_grouped["Español"] = df_real_grouped["Español"] / 10.0
                     df_real_grouped["Language Arts"] = df_real_grouped["Language Arts"] / 10.0
                     
-                    df_mock = df_mock.set_index(["campus", "Bloque"])
-                    df_real_grouped = df_real_grouped.set_index(["campus", "Bloque"])
-                    
-                    df_combined = df_real_grouped.combine_first(df_mock).reset_index()
-                    conn.close()
-                    
-                    # Ordenar bloques B1..B5
-                    def _sort_key(r):
-                        b = str(r['Bloque']).upper().strip()
-                        num = int(b[1:]) if b.startswith('B') and b[1:].isdigit() else 99
-                        return (r['campus'], num)
-                        
-                    df_combined['sort_order'] = df_combined['Bloque'].apply(
+                    df_real_grouped['sort_order'] = df_real_grouped['Bloque'].apply(
                         lambda b: int(str(b)[1:]) if str(b).startswith('B') and str(b)[1:].isdigit() else 99
                     )
-                    df_combined = df_combined.sort_values(['campus', 'sort_order']).drop(columns=['sort_order'])
+                    df_combined = df_real_grouped.sort_values(['campus', 'sort_order']).drop(columns=['sort_order'])
+                    conn.close()
                     return df_combined
             conn.close()
         except Exception:
             pass
             
-    return df_mock
+    return empty_df
 
 @st.cache_data
 def load_clima_heatmap():
-    """Genera datos ICE de Clima Escolar, priorizando base de datos."""
-    data = []
-    campus_list = ["Misiones", "Nuevo Sur", "San Agustín"]
-    categorias = ["Estrés Acumulado", "Motivación", "Sentido de Pertenencia", "Seguridad Física"]
-    respuestas = ["Siempre", "A veces", "Nunca"]
-    
-    for c in campus_list:
-        for cat in categorias:
-            for resp in respuestas:
-                base = np.random.uniform(0.1, 0.5)
-                if resp == "Siempre" and cat != "Estrés Acumulado": base += 0.4
-                if resp == "Nunca" and cat == "Estrés Acumulado": base += 0.3
-                data.append({"campus": c, "Categoría": cat, "Respuesta": resp, "Proporción": base})
-                
-    df = pd.DataFrame(data)
-    df['Proporción'] = df.groupby(['campus', 'Categoría'])['Proporción'].transform(lambda x: x / x.sum())
+    """Genera datos ICE de Clima Escolar desde la base de datos."""
+    df = pd.DataFrame(columns=["campus", "Categoría", "Respuesta", "Proporción"])
     
     if os.path.exists(DB_PATH):
         try:
@@ -583,19 +787,9 @@ def load_clima_heatmap():
 
 @st.cache_data
 def load_disciplina_data():
-    """Genera datos de Disciplina, priorizando la base de datos."""
-    df_casos = pd.DataFrame({
-        "campus": ["Misiones", "Nuevo Sur", "San Agustín"],
-        "Violencia Escolar": [2, 0, 1],
-        "Faltas Graves": [5, 2, 4],
-        "Apatía Severa": [12, 8, 15]
-    })
-    
-    df_cartas = pd.DataFrame({
-        "campus": ["Misiones", "Nuevo Sur", "San Agustín"],
-        "Firmadas": [45, 60, 38],
-        "Pendientes": [10, 5, 22]
-    })
+    """Genera datos de Disciplina desde la base de datos."""
+    df_casos = pd.DataFrame(columns=["campus", "Violencia Escolar", "Faltas Graves", "Apatía Severa"])
+    df_cartas = pd.DataFrame(columns=["campus", "Firmadas", "Pendientes"])
     
     if os.path.exists(DB_PATH):
         try:
@@ -616,6 +810,37 @@ def load_disciplina_data():
             pass
             
     return df_casos, df_cartas
+
+def reset_all_system_data():
+    """
+    Elimina completamente todos los datos almacenados en SQLite y en st.session_state.
+    Restablece la aplicación a su estado inicial en blanco.
+    """
+    if os.path.exists(DB_PATH):
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            tables = [
+                "academic_data", "attendance_data", "normalized_attendance", 
+                "resumen_diario_nivel", "clima_data", "disciplina_casos", 
+                "disciplina_cartas", "practica_apps_kpis", "practica_correlacion", "audit_logs"
+            ]
+            for t in tables:
+                cursor.execute(f"DROP TABLE IF EXISTS {t}")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+            
+    init_audit_table()
+    init_attendance_tables()
+
+    keys_to_keep = {"authenticated", "username", "user_name", "user_role", "user_email"}
+    keys_to_delete = [k for k in st.session_state if k not in keys_to_keep]
+    for k in keys_to_delete:
+        del st.session_state[k]
+        
+    st.cache_data.clear()
 
 def procesar_archivo_subido(uploaded_file):
     """

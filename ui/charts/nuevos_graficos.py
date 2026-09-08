@@ -76,8 +76,7 @@ def chart_desempeno_nivel_barras(df_des: pd.DataFrame):
     color_map = {
         'Primaria': '#3b82f6',     # Azul Royal
         'Secundaria': '#8b5cf6',   # Púrpura / Índigo
-        'Preescolar': '#10b981',   # Esmeralda
-        'Preparatoria': '#f59e0b'  # Ámbar Cálido
+        'Preescolar': '#10b981'    # Esmeralda
     }
     df_plot['Color'] = df_plot['Nivel'].map(lambda n: color_map.get(str(n), '#64748b'))
     

@@ -23,20 +23,26 @@ def render_academico_section(sede_actual: str):
     )
 
     if uploaded is not None:
-        resultado = procesar_archivo_academico(uploaded, target_campus=sede_actual)
-        if resultado.get("error"):
-            st.error(resultado["error"])
-            return False
+        file_state_key = f"last_up_acad_{sede_actual.lower().replace(' ', '_')}"
+        if st.session_state.get(file_state_key) != uploaded.name:
+            resultado = procesar_archivo_academico(uploaded, target_campus=sede_actual)
+            if resultado.get("error"):
+                st.error(resultado["error"])
+                return False
 
-        if resultado.get("campus") != "Desconocido" and resultado.get("campus") != sede_actual:
-            st.error(f"Acceso Bloqueado: El archivo corresponde a **{resultado.get('campus')}** y no a **{sede_actual}**. Sube el archivo en su sede correspondiente.")
-            return False
+            if resultado.get("campus") != "Desconocido" and resultado.get("campus") != sede_actual:
+                st.error(f"Acceso Bloqueado: El archivo corresponde a **{resultado.get('campus')}** y no a **{sede_actual}**. Sube el archivo en su sede correspondiente.")
+                return False
 
-        clave_bim = f"academico_{sede_actual}_{resultado['bimestre']}"
-        st.session_state[clave_bim] = resultado
-        st.session_state[clave_estado] = resultado
-        acumular_bimestre(sede_actual, resultado)
-        st.success(f"{resultado['total_alumnos']} alumnos procesados · Bimestre {resultado['bimestre']}")
+            clave_bim = f"academico_{sede_actual}_{resultado['bimestre']}"
+            st.session_state[clave_bim] = resultado
+            st.session_state[clave_estado] = resultado
+            acumular_bimestre(sede_actual, resultado)
+            st.session_state[file_state_key] = uploaded.name
+            st.cache_data.clear()
+            st.rerun()
+
+        st.success(f"Archivo activo: {uploaded.name} · Bimestre {st.session_state[clave_estado]['bimestre']}")
 
     # ── Recopilar catálogo histórico de bimestres disponibles para este campus ──
     from src.logic.data_loader import get_academic_history_catalog, delete_academic_data
@@ -150,7 +156,7 @@ def render_academico_section(sede_actual: str):
     with k1:
         st.metric("Total alumnos", total)
     with k2:
-        st.metric("En desempeño global", f"{pct_global}%",
+        st.metric("Tasa de Alumnos en Nivel Óptimo (≥8.0 en todas)", f"{pct_global}%",
                   delta=f"Bimestre {bimestre}")
     with k3:
         if not df_des.empty and "pct_desempeno" in df_des.columns and "Nivel" in df_des.columns:
