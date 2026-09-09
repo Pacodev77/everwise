@@ -335,6 +335,7 @@ def _render_submodulo_ixl(sede_actual: str):
     st.markdown("#### IXL Diagnóstico Flex — Rendimiento Pedagógico")
     st.info("Sube el reporte de diagnóstico de IXL. El sistema soporta **archivos únicos multi-campus** (`IXL-Flex-Diagnostic-Results`) y distribuye los datos automáticamente.")
 
+    campus_filtro_global = "Todos los Campus (Global)"
     if sede_actual != "Global":
         col_up, col_del = st.columns([3, 1])
         with col_up:
@@ -350,7 +351,7 @@ def _render_submodulo_ixl(sede_actual: str):
                 eliminar_datos_ixl(sede_actual)
                 st.rerun()
     else:
-        col_up, col_sel, col_del = st.columns([2.2, 1.2, 1.0])
+        col_up, col_sel = st.columns([2.5, 1.5])
         with col_up:
             uploaded_ixl = st.file_uploader(
                 "Cargar reporte IXL (CSV/Excel) — Global",
@@ -358,13 +359,11 @@ def _render_submodulo_ixl(sede_actual: str):
                 key="up_ixl_global"
             )
         with col_sel:
-            sede_del_i = st.selectbox("Campus a eliminar", ["Misiones", "Nuevo Sur", "San Agustín"], key="sel_del_ixl_global")
-        with col_del:
-            st.write("")
-            st.write("")
-            if st.button("Eliminar campus", key="btn_del_ixl_global_sel", use_container_width=True, type="secondary"):
-                eliminar_datos_ixl(sede_del_i)
-                st.rerun()
+            campus_filtro_global = st.selectbox(
+                "Seleccionar Campus a consultar",
+                ["Todos los Campus (Global)", "Misiones", "Nuevo Sur", "San Agustín"],
+                key="sel_campus_view_ixl_global"
+            )
 
     if uploaded_ixl is not None:
         file_state_key = f"last_up_ixl_{sede_actual.lower().replace(' ', '_')}"
@@ -446,6 +445,7 @@ def _render_submodulo_ixl(sede_actual: str):
                     "error": None,
                     "total_alumnos": len(df_combined),
                     "df_raw": df_combined,
+                    "df_combined_all": df_combined,
                     "resumen_tier": calcular_resumen_tier(df_combined),
                     "resumen_grado": calcular_por_grado(df_combined),
                     "resumen_areas": calcular_areas(df_combined)
@@ -456,7 +456,23 @@ def _render_submodulo_ixl(sede_actual: str):
         return
 
     res = st.session_state[clave_ixl]
-    df_raw = res.get("df_raw", pd.DataFrame())
+    df_combined_all = res.get("df_combined_all", res.get("df_raw", pd.DataFrame()))
+
+    if sede_actual == "Global" and not df_combined_all.empty and "campus" in df_combined_all.columns:
+        if campus_filtro_global != "Todos los Campus (Global)":
+            df_raw = df_combined_all[df_combined_all["campus"] == campus_filtro_global].copy()
+        else:
+            df_raw = df_combined_all.copy()
+        
+        from src.logic.ixl_processor import calcular_resumen_tier, calcular_por_grado, calcular_areas
+        res["df_raw"] = df_raw
+        res["total_alumnos"] = len(df_raw)
+        res["resumen_tier"] = calcular_resumen_tier(df_raw)
+        res["resumen_grado"] = calcular_por_grado(df_raw)
+        res["resumen_areas"] = calcular_areas(df_raw)
+    else:
+        df_raw = res.get("df_raw", pd.DataFrame())
+
     if not df_raw.empty:
         df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
     
@@ -480,7 +496,7 @@ def _render_submodulo_ixl(sede_actual: str):
         kpi_card(
             titulo="ALUMNOS EVALUADOS IXL",
             valor=f"{total_alumnos}",
-            delta="Diagnóstico Flex Activo",
+            delta=f"Campus: {campus_filtro_global}" if sede_actual == "Global" else "Diagnóstico Flex Activo",
             estado="info"
         )
     with m2:
@@ -495,7 +511,7 @@ def _render_submodulo_ixl(sede_actual: str):
             estado_p = "risk"
 
         kpi_card(
-            titulo="PERCENTIL PROMEDIO GLOBAL" if sede_actual == "Global" else "PERCENTIL PROMEDIO",
+            titulo="PERCENTIL PROMEDIO GLOBAL" if (sede_actual == "Global" and campus_filtro_global == "Todos los Campus (Global)") else f"PERCENTIL PROMEDIO ({campus_filtro_global})" if sede_actual == "Global" else "PERCENTIL PROMEDIO",
             valor=f"{prom_percentil:.1f}%",
             delta=delta_p,
             estado=estado_p
@@ -519,10 +535,11 @@ def _render_submodulo_ixl(sede_actual: str):
         )
 
     # ── Comparativa de Diagnóstico IXL por Campus si es Global ──────────────
-    if sede_actual == "Global" and "campus" in df_raw.columns and not df_raw.empty:
+    df_comp_base = df_combined_all if not df_combined_all.empty else df_raw
+    if sede_actual == "Global" and "campus" in df_comp_base.columns and not df_comp_base.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("**Comparativa de Diagnóstico IXL por Campus Corporativo**")
-        df_comp = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
+        df_comp = df_comp_base.loc[:, ~df_comp_base.columns.duplicated()].copy()
         s_cpct = df_comp["Overall percentile"] if "Overall percentile" in df_comp.columns else None
         if isinstance(s_cpct, pd.DataFrame): s_cpct = s_cpct.iloc[:, 0]
         s_ctier = df_comp["Overall tier"] if "Overall tier" in df_comp.columns else None
