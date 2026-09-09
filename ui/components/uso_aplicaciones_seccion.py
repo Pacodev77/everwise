@@ -1,10 +1,16 @@
 # ui/components/uso_aplicaciones_seccion.py
 
 # pyrefly: ignore [missing-import]
+from pandas._libs.tslibs import nattype
+from pandas._libs.tslibs import nattype
+from pandas._libs.tslibs import nattype
+# pyrefly: ignore [missing-import]
 import streamlit as st
 # pyrefly: ignore [missing-import]
 import altair as alt
 import pandas as pd
+# pyrefly: ignore [missing-import]
+import numpy as np
 from src.logic.ixl_processor import procesar_ixl, acumular_ixl, cruzar_con_academico
 from src.logic.progrentis_processor import procesar_progrentis, save_progrentis_session
 from ui.components.kpi_cards import kpi_card

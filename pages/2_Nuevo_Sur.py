@@ -23,9 +23,15 @@ from src.logic.academic_processor import calcular_kpis_ejecutivos
 from ui.components.ixl_seccion import render_ixl_section, render_adopcion_y_correlacion
 from ui.components.academico_seccion import render_academico_section
 
+from PIL import Image
+try:
+    favicon = Image.open("assets/letra_blue.png")
+except Exception:
+    favicon = "assets/letra_blue.png"
+
 st.set_page_config(
     page_title="Everwise | Sede Nuevo Sur",
-    page_icon="assets/letra-e_blue.png",
+    page_icon=favicon,
     layout="wide"
 )
 

@@ -29,9 +29,10 @@ try:
     favicon = Image.open("assets/letra_blue.png")
 except Exception:
     favicon = "assets/letra_blue.png"
+
 st.set_page_config(
     page_title="Everwise | Sede San Agustín",
-    page_icon="assets/letra-e_blue.png",
+    page_icon=favicon,
     layout="wide"
 )
 
