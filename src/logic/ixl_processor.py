@@ -163,7 +163,7 @@ def procesar_ixl(uploaded_file, target_campus: str = None) -> dict:
             campus_splits[c] = res_c
             acumular_ixl(c, res_c)
     else:
-        c_name = target_campus if target_campus else "San Agustín"
+        c_name = target_campus if (target_campus and target_campus != "Global") else "San Agustín"
         df["campus_normalizado"] = c_name
         res_c = {
             "error": None,

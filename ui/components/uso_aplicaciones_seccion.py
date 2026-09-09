@@ -332,6 +332,12 @@ def _render_submodulo_progrentis(sede_actual: str):
 def _render_submodulo_ixl(sede_actual: str):
     clave_ixl = f"ixl_{sede_actual}"
 
+    if sede_actual == "Global" and clave_ixl in st.session_state:
+        df_old = st.session_state[clave_ixl].get("df_raw", pd.DataFrame())
+        if not df_old.empty:
+            if "campus" not in df_old.columns or (df_old["campus"] == "Global").any() or len(df_old) <= 5:
+                del st.session_state[clave_ixl]
+
     st.markdown("#### IXL Diagnóstico Flex — Rendimiento Pedagógico")
     st.info("Sube el reporte de diagnóstico de IXL. El sistema soporta **archivos únicos multi-campus** (`IXL-Flex-Diagnostic-Results`) y distribuye los datos automáticamente.")
 
@@ -385,15 +391,20 @@ def _render_submodulo_ixl(sede_actual: str):
 
     if sede_actual == "Global" or clave_ixl not in st.session_state:
         dfs_to_concat = []
-        # 1. Cargar desde SQLite
+        # 1. Cargar desde SQLite sólo campus válidos
         from src.logic.data_loader import get_db_connection
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ixl_diagnostics'")
             if cursor.fetchone():
-                query = "SELECT * FROM ixl_diagnostics WHERE campus = ?" if sede_actual != "Global" else "SELECT * FROM ixl_diagnostics"
-                df_ixl_db = pd.read_sql(query, conn, params=(sede_actual,) if sede_actual != "Global" else ())
+                if sede_actual != "Global":
+                    query = "SELECT * FROM ixl_diagnostics WHERE campus = ?"
+                    params = (sede_actual,)
+                else:
+                    query = "SELECT * FROM ixl_diagnostics WHERE campus IN ('Misiones', 'Nuevo Sur', 'San Agustín')"
+                    params = ()
+                df_ixl_db = pd.read_sql(query, conn, params=params)
                 if not df_ixl_db.empty:
                     dfs_to_concat.append(df_ixl_db)
             conn.close()
