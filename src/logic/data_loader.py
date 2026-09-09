@@ -674,12 +674,24 @@ def load_global_data():
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
-            if cursor.fetchone():
-                df_att = pd.read_sql("SELECT campus, Asistencia FROM attendance_data", conn)
-                if not df_att.empty:
-                    df_att_grouped = df_att.groupby("campus")["Asistencia"].mean().reset_index()
-                    df_asistencia = df_att_grouped.rename(columns={"Asistencia": "asistencia"})
+            
+            # 1. Reconstruir asistencia desde tablas normalizadas/resumen primero
+            rows_ast = []
+            for c in ["Misiones", "Nuevo Sur", "San Agustín"]:
+                st_data = reconstruct_attendance_state(c)
+                if st_data and "niveles" in st_data and isinstance(st_data["niveles"], pd.DataFrame) and not st_data["niveles"].empty:
+                    mean_a = st_data["niveles"]["Asistencia"].mean()
+                    if pd.notna(mean_a) and mean_a > 0:
+                        rows_ast.append({"campus": c, "asistencia": float(mean_a)})
+            if rows_ast:
+                df_asistencia = pd.DataFrame(rows_ast)
+            else:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
+                if cursor.fetchone():
+                    df_att = pd.read_sql("SELECT campus, Asistencia FROM attendance_data", conn)
+                    if not df_att.empty:
+                        df_att_grouped = df_att.groupby("campus")["Asistencia"].mean().reset_index()
+                        df_asistencia = df_att_grouped.rename(columns={"Asistencia": "asistencia"})
             
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='academic_data'")
             if cursor.fetchone():
@@ -712,9 +724,10 @@ def load_global_data():
 
 def obtener_datos_por_ciclo(ciclo: str, df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25):
     """Ajusta dinámicamente los dataframes de asistencia y académico según el ciclo escolar seleccionado."""
-    if ciclo == "2025 - 2026":
+    ciclo_clean = str(ciclo).strip() if ciclo else ""
+    if ciclo_clean in ["2026 - 2027", "2025 - 2026"] or not ciclo_clean:
         return df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25
-    elif ciclo == "2024 - 2025":
+    elif ciclo_clean == "2024 - 2025":
         df_ast_23_24 = df_ast_24_25.copy()
         if not df_ast_23_24.empty and "asistencia" in df_ast_23_24.columns:
             df_ast_23_24["asistencia"] = (df_ast_23_24["asistencia"] - 0.02).clip(0, 1)
@@ -723,20 +736,15 @@ def obtener_datos_por_ciclo(ciclo: str, df_ast_25_26, df_aca_25_26, df_ast_24_25
             df_aca_23_24["dominio"] = (df_aca_23_24["dominio"] - 0.03).clip(0, 1)
         return df_ast_24_25, df_aca_24_25, df_ast_23_24, df_aca_23_24
     else:
+        if not df_ast_25_26.empty or not df_aca_25_26.empty:
+            return df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25
         df_ast_23_24 = df_ast_24_25.copy()
         if not df_ast_23_24.empty and "asistencia" in df_ast_23_24.columns:
             df_ast_23_24["asistencia"] = (df_ast_23_24["asistencia"] - 0.02).clip(0, 1)
         df_aca_23_24 = df_aca_24_25.copy()
         if not df_aca_23_24.empty and "dominio" in df_aca_23_24.columns:
             df_aca_23_24["dominio"] = (df_aca_23_24["dominio"] - 0.03).clip(0, 1)
-        
-        df_ast_22_23 = df_ast_23_24.copy()
-        if not df_ast_22_23.empty and "asistencia" in df_ast_22_23.columns:
-            df_ast_22_23["asistencia"] = (df_ast_22_23["asistencia"] - 0.01).clip(0, 1)
-        df_aca_22_23 = df_aca_23_24.copy()
-        if not df_aca_22_23.empty and "dominio" in df_aca_22_23.columns:
-            df_aca_22_23["dominio"] = (df_aca_22_23["dominio"] - 0.02).clip(0, 1)
-        return df_ast_23_24, df_aca_23_24, df_ast_22_23, df_aca_22_23
+        return df_ast_23_24, df_aca_23_24, df_ast_24_25, df_aca_24_25
 
 
 @st.cache_data

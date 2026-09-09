@@ -175,6 +175,12 @@ with tab1:
     
     for c in campus_keys:
         state_key = f"asistencia_data_{c}"
+        if state_key not in st.session_state:
+            from src.logic.data_loader import reconstruct_attendance_state
+            state_data = reconstruct_attendance_state(c)
+            if state_data:
+                st.session_state[state_key] = state_data
+
         if state_key in st.session_state:
             try:
                 data = st.session_state[state_key]

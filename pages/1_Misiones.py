@@ -161,7 +161,24 @@ with tab1:
     k1, k2, k3 = st.columns(3, gap="large")
 
     # 1. Asistencia del campus
-    asis_val = float(df_ast["asistencia"].iloc[0]) if not df_ast.empty else None
+    clave_asis = f"asistencia_data_{sede_actual}"
+    asis_val = None
+    if clave_asis in st.session_state and isinstance(st.session_state[clave_asis], dict):
+        res_ast = st.session_state[clave_asis]
+        if "niveles" in res_ast and isinstance(res_ast["niveles"], pd.DataFrame) and not res_ast["niveles"].empty:
+            asis_val = float(res_ast["niveles"]["Asistencia"].mean())
+
+    if asis_val is None or pd.isna(asis_val):
+        from src.logic.data_loader import reconstruct_attendance_state
+        state_data = reconstruct_attendance_state(sede_actual)
+        if state_data and "niveles" in state_data and isinstance(state_data["niveles"], pd.DataFrame) and not state_data["niveles"].empty:
+            st.session_state[clave_asis] = state_data
+            asis_val = float(state_data["niveles"]["Asistencia"].mean())
+
+    if (asis_val is None or pd.isna(asis_val)) and not df_ast.empty and "asistencia" in df_ast.columns:
+        first_val = df_ast["asistencia"].iloc[0]
+        if pd.notna(first_val):
+            asis_val = float(first_val)
 
     # 2. Desempeño y Promedio de Materias
     if kpis_reales:
