@@ -22,9 +22,11 @@ TIER_COLOR = {
     "Above grade"     : "#3b82f6",
 }
 
-def clean_numeric(series: pd.Series) -> pd.Series:
+def clean_numeric(series) -> pd.Series:
     if series is None:
         return pd.Series(dtype=float)
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
     if series.dtype == object:
         cleaned = series.astype(str).str.strip().str.replace("%", "", regex=False)
         cleaned = cleaned.replace(["", "-", "--", "N/A", "nan", "None"], None)
@@ -67,8 +69,11 @@ def procesar_ixl(uploaded_file, target_campus: str = None) -> dict:
     except Exception as e:
         return {"error": f"No se pudo leer el archivo IXL: {e}"}
 
-    if df.empty:
+    if df is None or df.empty:
         return {"error": "El archivo IXL está vacío."}
+
+    # Desduplicar nombres de columnas si existen repetidas desde el origen
+    df = df.loc[:, ~df.columns.duplicated()].copy()
 
     # Normalización de cabeceras (mapping flexible de alias en inglés/español)
     col_map = {}
@@ -92,6 +97,7 @@ def procesar_ixl(uploaded_file, target_campus: str = None) -> dict:
 
     if col_map:
         df = df.rename(columns=col_map)
+    df = df.loc[:, ~df.columns.duplicated()].copy()
 
     if "School" in df.columns:
         school_col = "School"
@@ -103,10 +109,17 @@ def procesar_ixl(uploaded_file, target_campus: str = None) -> dict:
         return {"error": f"Columnas faltantes en IXL: {', '.join(faltantes)}"}
 
     # Limpieza de valores numéricos de percentil
-    df["Overall percentile"] = clean_numeric(df["Overall percentile"])
+    s_pct = df["Overall percentile"]
+    if isinstance(s_pct, pd.DataFrame):
+        s_pct = s_pct.iloc[:, 0]
+    df["Overall percentile"] = clean_numeric(s_pct)
 
     # Si 'Overall tier' no venía explícito pero tenemos percentil, podemos inferirlo
-    if "Overall tier" not in df.columns or df["Overall tier"].isnull().all():
+    s_tier = df["Overall tier"] if "Overall tier" in df.columns else None
+    if isinstance(s_tier, pd.DataFrame):
+        s_tier = s_tier.iloc[:, 0]
+
+    if s_tier is None or s_tier.isnull().all():
         def infer_tier(p):
             if pd.isna(p): return "Sin datos"
             if p >= 60: return "Above grade"
@@ -115,18 +128,23 @@ def procesar_ixl(uploaded_file, target_campus: str = None) -> dict:
             else: return "Far below grade"
         df["Overall tier"] = df["Overall percentile"].apply(infer_tier)
     else:
-        # Reemplazar representaciones nulas de IXL como '--', '-', 'N/A' por NaN y luego 'Sin datos'
-        df["Overall tier"] = df["Overall tier"].astype(str).str.strip().replace(["--", "-", "", "N/A", "nan", "None"], np.nan).fillna("Sin datos")
+        df["Overall tier"] = s_tier.astype(str).str.strip().replace(["--", "-", "", "N/A", "nan", "None"], np.nan).fillna("Sin datos")
     
     for area in AREAS_MATH:
         col_pct = f"{area} percentile"
         if col_pct in df.columns:
-            df[col_pct] = clean_numeric(df[col_pct])
+            s_area = df[col_pct]
+            if isinstance(s_area, pd.DataFrame):
+                s_area = s_area.iloc[:, 0]
+            df[col_pct] = clean_numeric(s_area)
 
     # Manejo Multi-Campus si existe columna School
     campus_splits = {}
     if school_col:
-        df["campus_normalizado"] = df[school_col].apply(normalizar_nombre_school)
+        s_sch = df[school_col]
+        if isinstance(s_sch, pd.DataFrame):
+            s_sch = s_sch.iloc[:, 0]
+        df["campus_normalizado"] = s_sch.apply(normalizar_nombre_school)
         if target_campus:
             df["campus_normalizado"] = df["campus_normalizado"].fillna(target_campus)
             
@@ -171,11 +189,19 @@ def procesar_ixl(uploaded_file, target_campus: str = None) -> dict:
 
 def calcular_resumen_tier(df: pd.DataFrame) -> pd.DataFrame:
     """% de alumnos por nivel de desempeño global."""
-    total = len(df)
-    if total == 0:
+    if df is None or df.empty:
         return pd.DataFrame(columns=["Tier", "Alumnos", "Porcentaje", "Color"])
+    df_calc = df.loc[:, ~df.columns.duplicated()].copy()
+    total = len(df_calc)
+    if total == 0 or "Overall tier" not in df_calc.columns:
+        return pd.DataFrame(columns=["Tier", "Alumnos", "Porcentaje", "Color"])
+
+    s_tier = df_calc["Overall tier"]
+    if isinstance(s_tier, pd.DataFrame):
+        s_tier = s_tier.iloc[:, 0]
+
     resumen = (
-        df["Overall tier"]
+        s_tier
         .value_counts()
         .reset_index()
     )
@@ -186,8 +212,19 @@ def calcular_resumen_tier(df: pd.DataFrame) -> pd.DataFrame:
 
 def calcular_por_grado(df: pd.DataFrame) -> pd.DataFrame:
     """Percentil promedio y distribución de tiers por grado."""
-    if df.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
+
+    df_calc = df.loc[:, ~df.columns.duplicated()].copy()
+    if "Grade" not in df_calc.columns or "Overall percentile" not in df_calc.columns or "Overall tier" not in df_calc.columns:
+        return pd.DataFrame()
+
+    if isinstance(df_calc["Grade"], pd.DataFrame):
+        df_calc["Grade"] = df_calc["Grade"].iloc[:, 0]
+    if isinstance(df_calc["Overall percentile"], pd.DataFrame):
+        df_calc["Overall percentile"] = df_calc["Overall percentile"].iloc[:, 0]
+    if isinstance(df_calc["Overall tier"], pd.DataFrame):
+        df_calc["Overall tier"] = df_calc["Overall tier"].iloc[:, 0]
 
     def format_grade(g):
         g_str = str(g).strip()
@@ -201,7 +238,6 @@ def calcular_por_grado(df: pd.DataFrame) -> pd.DataFrame:
         except Exception:
             return f"Grado {g_str}"
 
-    df_calc = df.copy()
     df_calc["GradeLabel"] = df_calc["Grade"].apply(format_grade)
 
     resumen = df_calc.groupby("GradeLabel").agg(
@@ -229,13 +265,17 @@ def calcular_por_grado(df: pd.DataFrame) -> pd.DataFrame:
 
 def calcular_areas(df: pd.DataFrame) -> pd.DataFrame:
     """Percentil promedio por área de Math."""
-    if df.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
+    df_calc = df.loc[:, ~df.columns.duplicated()].copy()
     filas = []
     for area in AREAS_MATH:
         col_pct = f"{area} percentile"
-        if col_pct in df.columns:
-            mean_val = df[col_pct].mean()
+        if col_pct in df_calc.columns:
+            s_area = df_calc[col_pct]
+            if isinstance(s_area, pd.DataFrame):
+                s_area = s_area.iloc[:, 0]
+            mean_val = pd.to_numeric(s_area, errors="coerce").mean()
             filas.append({
                 "Área"     : area.replace(" and ", " & ").title(),
                 "Percentil": round(mean_val, 1) if pd.notna(mean_val) else 0.0,
@@ -263,14 +303,18 @@ def cruzar_con_academico(resultado_ixl: dict, resultado_academico: dict) -> dict
     if df_ixl is None or df_aca is None or df_ixl.empty or df_aca.empty:
         return None
 
+    df_ixl = df_ixl.loc[:, ~df_ixl.columns.duplicated()].copy()
+    df_aca = df_aca.loc[:, ~df_aca.columns.duplicated()].copy()
+
     total_matricula = resultado_academico.get("total_alumnos", len(df_aca))
     total_ixl        = resultado_ixl.get("total_alumnos", len(df_ixl))
     pct_adopcion      = round(min(total_ixl / max(total_matricula, 1), 1.0) * 100, 1)
 
     # 1. Extraer GradoNum entero del dataframe académico
-    df_aca = df_aca.copy()
     if "Grupo" in df_aca.columns:
-        df_aca["GradoNum"] = pd.to_numeric(df_aca["Grupo"].astype(str).str.extract(r"(\d+)")[0], errors="coerce")
+        s_grupo = df_aca["Grupo"]
+        if isinstance(s_grupo, pd.DataFrame): s_grupo = s_grupo.iloc[:, 0]
+        df_aca["GradoNum"] = pd.to_numeric(s_grupo.astype(str).str.extract(r"(\d+)")[0], errors="coerce")
     else:
         return None
     df_aca = df_aca.dropna(subset=["GradoNum"])
@@ -287,9 +331,10 @@ def cruzar_con_academico(resultado_ixl: dict, resultado_academico: dict) -> dict
     ).reset_index()
 
     # 2. Extraer GradoNum entero del dataframe IXL
-    df_ixl = df_ixl.copy()
     if "Grade" in df_ixl.columns:
-        df_ixl["GradoNum"] = pd.to_numeric(df_ixl["Grade"].astype(str).str.extract(r"(\d+)")[0], errors="coerce")
+        s_grade = df_ixl["Grade"]
+        if isinstance(s_grade, pd.DataFrame): s_grade = s_grade.iloc[:, 0]
+        df_ixl["GradoNum"] = pd.to_numeric(s_grade.astype(str).str.extract(r"(\d+)")[0], errors="coerce")
     else:
         return None
     df_ixl = df_ixl.dropna(subset=["GradoNum"])

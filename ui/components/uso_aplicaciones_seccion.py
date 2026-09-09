@@ -411,24 +411,45 @@ def _render_submodulo_ixl(sede_actual: str):
                     dfs_to_concat.append(df_c)
 
         if dfs_to_concat:
-            df_combined = pd.concat(dfs_to_concat, ignore_index=True)
-            df_combined = df_combined.rename(columns={"Overall_percentile": "Overall percentile", "Overall_tier": "Overall tier"})
-            
-            dedup_keys = [c for c in ["campus", "ID", "Matricula", "First name", "Last name", "Grade"] if c in df_combined.columns]
-            if len(dedup_keys) >= 2:
-                df_combined = df_combined.drop_duplicates(subset=dedup_keys, keep="last")
-            elif "campus" in df_combined.columns and "Grade" in df_combined.columns and "Overall percentile" in df_combined.columns:
-                df_combined = df_combined.drop_duplicates(subset=["campus", "Grade", "Overall percentile"], keep="last")
+            dfs_clean = []
+            for d in dfs_to_concat:
+                if d is None or d.empty:
+                    continue
+                dc = d.loc[:, ~d.columns.duplicated()].copy()
+                if "Overall_percentile" in dc.columns:
+                    if "Overall percentile" in dc.columns:
+                        dc["Overall percentile"] = dc["Overall percentile"].fillna(dc["Overall_percentile"])
+                        dc = dc.drop(columns=["Overall_percentile"])
+                    else:
+                        dc = dc.rename(columns={"Overall_percentile": "Overall percentile"})
+                if "Overall_tier" in dc.columns:
+                    if "Overall tier" in dc.columns:
+                        dc["Overall tier"] = dc["Overall tier"].fillna(dc["Overall_tier"])
+                        dc = dc.drop(columns=["Overall_tier"])
+                    else:
+                        dc = dc.rename(columns={"Overall_tier": "Overall tier"})
+                dc = dc.loc[:, ~dc.columns.duplicated()].copy()
+                dfs_clean.append(dc)
 
-            from src.logic.ixl_processor import calcular_resumen_tier, calcular_por_grado, calcular_areas
-            st.session_state[clave_ixl] = {
-                "error": None,
-                "total_alumnos": len(df_combined),
-                "df_raw": df_combined,
-                "resumen_tier": calcular_resumen_tier(df_combined),
-                "resumen_grado": calcular_por_grado(df_combined),
-                "resumen_areas": calcular_areas(df_combined)
-            }
+            if dfs_clean:
+                df_combined = pd.concat(dfs_clean, ignore_index=True)
+                df_combined = df_combined.loc[:, ~df_combined.columns.duplicated()].copy()
+                
+                dedup_keys = [c for c in ["campus", "ID", "Matricula", "First name", "Last name", "Grade"] if c in df_combined.columns]
+                if len(dedup_keys) >= 2:
+                    df_combined = df_combined.drop_duplicates(subset=dedup_keys, keep="last")
+                elif "campus" in df_combined.columns and "Grade" in df_combined.columns and "Overall percentile" in df_combined.columns:
+                    df_combined = df_combined.drop_duplicates(subset=["campus", "Grade", "Overall percentile"], keep="last")
+
+                from src.logic.ixl_processor import calcular_resumen_tier, calcular_por_grado, calcular_areas
+                st.session_state[clave_ixl] = {
+                    "error": None,
+                    "total_alumnos": len(df_combined),
+                    "df_raw": df_combined,
+                    "resumen_tier": calcular_resumen_tier(df_combined),
+                    "resumen_grado": calcular_por_grado(df_combined),
+                    "resumen_areas": calcular_areas(df_combined)
+                }
 
     if clave_ixl not in st.session_state or st.session_state[clave_ixl].get("total_alumnos", 0) == 0:
         st.info("Sube el archivo de diagnóstico IXL para visualizar los niveles de logro y percentiles por grado.")
@@ -436,13 +457,21 @@ def _render_submodulo_ixl(sede_actual: str):
 
     res = st.session_state[clave_ixl]
     df_raw = res.get("df_raw", pd.DataFrame())
+    if not df_raw.empty:
+        df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
     
     total_alumnos = res.get("total_alumnos", len(df_raw))
-    prom_percentil = df_raw["Overall percentile"].mean() if "Overall percentile" in df_raw.columns and not df_raw.empty else 0.0
+    s_pct = df_raw["Overall percentile"] if "Overall percentile" in df_raw.columns else None
+    if isinstance(s_pct, pd.DataFrame):
+        s_pct = s_pct.iloc[:, 0]
+    prom_percentil = pd.to_numeric(s_pct, errors="coerce").mean() if s_pct is not None and not s_pct.empty else 0.0
     
     pct_on_above = 0.0
-    if "Overall tier" in df_raw.columns and total_alumnos > 0:
-        on_above_cnt = df_raw["Overall tier"].isin(["On grade", "Above grade"]).sum()
+    s_tier = df_raw["Overall tier"] if "Overall tier" in df_raw.columns else None
+    if isinstance(s_tier, pd.DataFrame):
+        s_tier = s_tier.iloc[:, 0]
+    if s_tier is not None and total_alumnos > 0:
+        on_above_cnt = s_tier.isin(["On grade", "Above grade"]).sum()
         pct_on_above = (on_above_cnt / total_alumnos) * 100.0
 
     # KPIs con formato ejecutivo (Semáforo + Flechas direccionales)
@@ -493,7 +522,22 @@ def _render_submodulo_ixl(sede_actual: str):
     if sede_actual == "Global" and "campus" in df_raw.columns and not df_raw.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("**Comparativa de Diagnóstico IXL por Campus Corporativo**")
-        res_campus = df_raw.groupby("campus").agg(
+        df_comp = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
+        s_cpct = df_comp["Overall percentile"] if "Overall percentile" in df_comp.columns else None
+        if isinstance(s_cpct, pd.DataFrame): s_cpct = s_cpct.iloc[:, 0]
+        s_ctier = df_comp["Overall tier"] if "Overall tier" in df_comp.columns else None
+        if isinstance(s_ctier, pd.DataFrame): s_ctier = s_ctier.iloc[:, 0]
+
+        s_camp = df_comp["campus"]
+        if isinstance(s_camp, pd.DataFrame): s_camp = s_camp.iloc[:, 0]
+
+        df_comp_clean = pd.DataFrame({
+            "campus": s_camp,
+            "Overall percentile": pd.to_numeric(s_cpct, errors="coerce") if s_cpct is not None else np.nan,
+            "Overall tier": s_ctier if s_ctier is not None else np.nan
+        })
+
+        res_campus = df_comp_clean.groupby("campus").agg(
             alumnos=("campus", "count"),
             percentil_prom=("Overall percentile", "mean"),
             pct_on_above=("Overall tier", lambda x: (x.isin(["On grade", "Above grade"]).sum() / len(x) * 100) if len(x) > 0 else 0)
