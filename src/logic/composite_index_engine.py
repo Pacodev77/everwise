@@ -90,7 +90,7 @@ def generar_datos_indice_compuesto(df_master: pd.DataFrame = None) -> tuple[pd.D
         campus_indices[campus]["B5"] = val_b5
 
         # Para continuidad visual en el gráfico, B3 también forma el puente a la línea punteada
-        for b, v in [("B4", val_b4), ("B5", val_b5)]:
+        for b, v in [("B3", val_b3), ("B4", val_b4), ("B5", val_b5)]:
             records.append({
                 "campus": campus,
                 "bimestre": b,
@@ -105,11 +105,13 @@ def generar_datos_indice_compuesto(df_master: pd.DataFrame = None) -> tuple[pd.D
         den = sum(MATRICULA_CAMPUS.values())
         g_val = round(num / den, 2)
         global_indices[b] = g_val
+
+    for b in ["B3", "B4", "B5"]:
         records.append({
             "campus": "Global",
             "bimestre": b,
             "bimestre_label": BIMESTRE_LABELS[b],
-            "indice": g_val,
+            "indice": global_indices[b],
             "tipo": "Proyección"
         })
 
