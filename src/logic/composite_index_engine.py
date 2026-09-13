@@ -2,6 +2,7 @@
 
 # pyrefly: ignore [missing-import]
 import pandas as pd
+# pyrefly: ignore [missing-import]
 import numpy as np
 
 MATRICULA_CAMPUS = {
@@ -19,7 +20,7 @@ BIMESTRE_LABELS = {
     "B5": "B5 (May-Jun)"
 }
 
-def generar_datos_indice_compuesto() -> tuple[pd.DataFrame, dict]:
+def generar_datos_indice_compuesto(df_master: pd.DataFrame = None) -> tuple[pd.DataFrame, dict]:
     """
     Genera y calcula el Índice Compuesto Institucional para Misiones, Nuevo Sur, San Agustín y Global.
     Fórmula: (Calificaciones % * 0.50) + (IXL % * 0.30) + (Progrentis % * 0.20)
@@ -149,5 +150,15 @@ def generar_datos_indice_compuesto() -> tuple[pd.DataFrame, dict]:
             "color_hex": color_hex,
             "motivo": motivo
         }
+
+    campus_status["Global"] = {
+        "indice_actual": global_indices["B3"],
+        "indice_b5": global_indices["B5"],
+        "global_b3": global_b3,
+        "diff": 0.0,
+        "estado": "info",
+        "color_hex": "#0f172a",
+        "motivo": "Promedio Global"
+    }
 
     return df_res, campus_status
