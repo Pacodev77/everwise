@@ -660,6 +660,70 @@ def save_practica_data(df_apps_kpis, df_correlacion):
     finally:
         conn.close()
 
+def save_practica_docente_data(campus: str, df: pd.DataFrame):
+    """Guarda y consolida los datos de rúbricas docentes en SQLite."""
+    if df is None or df.empty:
+        return
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_docente_data'")
+        if not cursor.fetchone():
+            df.to_sql("practica_docente_data", conn, if_exists="replace", index=False)
+        else:
+            if campus != "Global":
+                cursor.execute("DELETE FROM practica_docente_data WHERE campus = ?", (campus,))
+            else:
+                cursor.execute("DELETE FROM practica_docente_data")
+            conn.commit()
+            df.to_sql("practica_docente_data", conn, if_exists="append", index=False)
+        
+        username = st.session_state.get("username", "Sistema") if "username" in st.session_state else "Sistema"
+        log_audit_event(username, "CARGA_PRACTICA_DOCENTE", f"Guardados {len(df)} registros de evaluación docente", campus)
+        st.cache_data.clear()
+    finally:
+        conn.close()
+
+def save_preescolar_data(campus: str, df: pd.DataFrame):
+    """Guarda y consolida las evaluaciones cualitativas de Preescolar en SQLite."""
+    if df is None or df.empty:
+        return
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='preescolar_qualitative_data'")
+        if not cursor.fetchone():
+            df.to_sql("preescolar_qualitative_data", conn, if_exists="replace", index=False)
+        else:
+            if campus != "Global":
+                cursor.execute("DELETE FROM preescolar_qualitative_data WHERE campus = ?", (campus,))
+            else:
+                cursor.execute("DELETE FROM preescolar_qualitative_data")
+            conn.commit()
+            df.to_sql("preescolar_qualitative_data", conn, if_exists="append", index=False)
+        st.cache_data.clear()
+    finally:
+        conn.close()
+
+def load_preescolar_data(campus: str = None) -> pd.DataFrame:
+    """Carga los datos cualitativos de Preescolar desde SQLite."""
+    if not os.path.exists(DB_PATH):
+        return pd.DataFrame()
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='preescolar_qualitative_data'")
+        if not cursor.fetchone():
+            return pd.DataFrame()
+        if campus and campus != "Global":
+            return pd.read_sql_query("SELECT * FROM preescolar_qualitative_data WHERE campus = ?", conn, params=(campus,))
+        return pd.read_sql_query("SELECT * FROM preescolar_qualitative_data", conn)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
 # --- Funciones de Carga Inteligente de Vistas ---
 
 @st.cache_data
@@ -958,7 +1022,7 @@ def reset_all_system_data():
                 "academic_data", "attendance_data", "normalized_attendance", 
                 "resumen_diario_nivel", "clima_data", "disciplina_casos", 
                 "disciplina_cartas", "practica_apps_kpis", "practica_correlacion", 
-                "audit_logs", "ixl_diagnostics", "progrentis_data"
+                "audit_logs", "ixl_diagnostics", "progrentis_data", "practica_docente_data"
             ]
             for t in tables:
                 cursor.execute(f"DROP TABLE IF EXISTS {t}")

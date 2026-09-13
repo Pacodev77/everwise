@@ -7,7 +7,8 @@ def kpi_card(titulo, valor, delta, estado="ok"):
     color = {
         "ok"     : "#22c55e",
         "warning": "#f59e0b",
-        "risk"   : "#ef4444"
+        "risk"   : "#ef4444",
+        "info"   : "#3b82f6"
     }.get(estado, "#22c55e")
 
     st.markdown(

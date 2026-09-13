@@ -9,11 +9,20 @@ def render_ixl_section(sede_actual: str):
     clave = f"ixl_{sede_actual}"
 
     st.markdown("#### Diagnóstico IXL Math")
-    uploaded = st.file_uploader(
-        "Cargar reporte IXL (CSV)",
-        type=["csv"],
-        key=f"up_ixl_{sede_actual.lower().replace(' ', '_')}"
-    )
+    col_up, col_del = st.columns([3, 1])
+    with col_up:
+        uploaded = st.file_uploader(
+            f"Cargar reporte IXL (CSV) — {sede_actual}",
+            type=["csv"],
+            key=f"up_ixl_{sede_actual.lower().replace(' ', '_')}"
+        )
+    with col_del:
+        st.write("")
+        st.write("")
+        if st.button(f"Eliminar archivo ({sede_actual})", key=f"del_ixl_top_{sede_actual.lower().replace(' ', '_')}", use_container_width=True, type="secondary"):
+            from ui.components.uso_aplicaciones_seccion import eliminar_datos_ixl
+            eliminar_datos_ixl(sede_actual)
+            st.rerun()
 
     if uploaded is not None:
         resultado = procesar_ixl(uploaded)

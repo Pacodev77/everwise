@@ -103,6 +103,9 @@ def restaurar_sesion_si_aplica() -> bool:
             st.session_state["user_role"] = user["role"]
             st.session_state["user_name"] = user["name"]
             st.session_state["user_email"] = user.get("email", "")
+            # Reafirmar parámetros en URL para garantizar persistencia continua
+            st.query_params["auth_user"] = user["username"]
+            st.query_params["auth_token"] = token
             return True
     return False
 
@@ -171,7 +174,13 @@ def require_login(campus_context="General"):
             render_login_page()
             st.stop()
         
-    # 2. RBAC estricto
+    # 2. Sincronizar parámetros en URL para garantizar persistencia tras refrescar (F5 / botón recargar)
+    username = st.session_state.get("username")
+    if username:
+        st.query_params["auth_user"] = username
+        st.query_params["auth_token"] = generar_token(username)
+
+    # 3. RBAC estricto
     user_role = st.session_state.get("user_role", "Invitado")
     
     if user_role != "General":

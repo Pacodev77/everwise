@@ -171,3 +171,79 @@ def chart_promedios_materia_nivel(df_prom: pd.DataFrame):
     )
     
     return (bars + text).properties(height=260).configure_view(stroke='transparent')
+
+def chart_disciplina_casos(df_casos: pd.DataFrame):
+    """Gráfico de barras ejecutivas para Radar de Casos Especiales."""
+    value_vars = [c for c in ['Violencia Escolar', 'Faltas Graves', 'Apatía Severa'] if c in df_casos.columns]
+    df_melt = df_casos.melt(id_vars=['campus'], value_vars=value_vars, var_name='Categoría', value_name='Casos')
+    df_melt['Casos'] = df_melt['Casos'].astype(int)
+    
+    is_multi = len(df_melt['campus'].unique()) > 1
+    
+    if is_multi:
+        base = alt.Chart(df_melt).encode(
+            x=alt.X('campus:N', title=None, axis=alt.Axis(labelAngle=0, labelFontSize=12, labelFontWeight='bold')),
+            xOffset=alt.XOffset('Categoría:N', sort=['Violencia Escolar', 'Faltas Graves', 'Apatía Severa']),
+            y=alt.Y('Casos:Q', title='Número de Casos', axis=alt.Axis(grid=True, gridDash=[3, 3], gridColor='#e2e8f0')),
+            color=alt.Color('Categoría:N', scale=alt.Scale(
+                domain=['Violencia Escolar', 'Faltas Graves', 'Apatía Severa'],
+                range=['#ef4444', '#f59e0b', '#6366f1']
+            ), legend=alt.Legend(title=None, orient='top', labelFontSize=11)),
+            tooltip=[alt.Tooltip('campus:N'), alt.Tooltip('Categoría:N'), alt.Tooltip('Casos:Q')]
+        )
+    else:
+        base = alt.Chart(df_melt).encode(
+            x=alt.X('Categoría:N', title=None, axis=alt.Axis(labelAngle=0, labelFontSize=12, labelFontWeight='bold'), sort=['Violencia Escolar', 'Faltas Graves', 'Apatía Severa']),
+            y=alt.Y('Casos:Q', title='Número de Casos', axis=alt.Axis(grid=True, gridDash=[3, 3], gridColor='#e2e8f0')),
+            color=alt.Color('Categoría:N', scale=alt.Scale(
+                domain=['Violencia Escolar', 'Faltas Graves', 'Apatía Severa'],
+                range=['#ef4444', '#f59e0b', '#6366f1']
+            ), legend=None),
+            tooltip=[alt.Tooltip('Categoría:N'), alt.Tooltip('Casos:Q')]
+        )
+        
+    bars = base.mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5, size=28 if not is_multi else 20)
+    text = base.mark_text(baseline='bottom', dy=-4, fontWeight='bold', fontSize=12, color='#0f172a').encode(
+        text=alt.Text('Casos:Q', format='d')
+    )
+    
+    return (bars + text).properties(height=240).configure_view(stroke='transparent')
+
+def chart_disciplina_cartas(df_cartas: pd.DataFrame):
+    """Gráfico ejecutivo para Estatus de Cartas Compromiso (Firmadas vs Pendientes)."""
+    value_vars = [c for c in ['Firmadas', 'Pendientes'] if c in df_cartas.columns]
+    df_melt = df_cartas.melt(id_vars=['campus'], value_vars=value_vars, var_name='Estado', value_name='Cantidad')
+    df_melt['Cantidad'] = df_melt['Cantidad'].astype(int)
+    
+    is_multi = len(df_melt['campus'].unique()) > 1
+    
+    if is_multi:
+        base = alt.Chart(df_melt).encode(
+            y=alt.Y('campus:N', title=None, axis=alt.Axis(labelFontSize=12, labelFontWeight='bold')),
+            x=alt.X('Cantidad:Q', title='Total Cartas', axis=alt.Axis(grid=True, gridDash=[3, 3], gridColor='#e2e8f0')),
+            color=alt.Color('Estado:N', scale=alt.Scale(
+                domain=['Firmadas', 'Pendientes'],
+                range=['#10b981', '#f43f5e']
+            ), legend=alt.Legend(title=None, orient='top', labelFontSize=11)),
+            tooltip=[alt.Tooltip('campus:N'), alt.Tooltip('Estado:N'), alt.Tooltip('Cantidad:Q')]
+        )
+        bars = base.mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, size=24)
+        text = base.mark_text(align='left', dx=5, baseline='middle', fontWeight='bold', fontSize=11, color='#0f172a').encode(
+            text=alt.Text('Cantidad:Q', format='d')
+        )
+        return (bars + text).properties(height=240).configure_view(stroke='transparent')
+    else:
+        base = alt.Chart(df_melt).encode(
+            theta=alt.Theta('Cantidad:Q', stack=True),
+            color=alt.Color('Estado:N', scale=alt.Scale(
+                domain=['Firmadas', 'Pendientes'],
+                range=['#10b981', '#f43f5e']
+            ), legend=alt.Legend(title=None, orient='bottom', labelFontSize=11)),
+            tooltip=[alt.Tooltip('Estado:N'), alt.Tooltip('Cantidad:Q')]
+        )
+        arc = base.mark_arc(innerRadius=45, outerRadius=75)
+        text = base.mark_text(radius=60, fontWeight='bold', fontSize=13, color='white').encode(
+            text=alt.Text('Cantidad:Q', format='d')
+        )
+        return (arc + text).properties(height=240).configure_view(stroke='transparent')
+

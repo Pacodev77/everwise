@@ -128,12 +128,24 @@ def render_campus_uploader(campus_name: str):
     clave_estado = f"academico_propio_{campus_name}"
 
     st.markdown(f"#### Cargar datos de {campus_name}")
-    uploaded_files = st.file_uploader(
-        f"Archivos Excel — {campus_name}",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key=f"up_{campus_name.lower().replace(' ', '_')}"
-    )
+    col_up, col_del = st.columns([3, 1])
+    with col_up:
+        uploaded_files = st.file_uploader(
+            f"Archivos Excel — {campus_name}",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            key=f"up_{campus_name.lower().replace(' ', '_')}"
+        )
+    with col_del:
+        st.write("")
+        st.write("")
+        if st.button(f"Eliminar archivo ({campus_name})", key=f"btn_del_campus_up_{campus_name.lower().replace(' ', '_')}", use_container_width=True, type="secondary"):
+            delete_academic_data(campus_name)
+            for k in list(st.session_state.keys()):
+                if k.startswith(f"academico_{campus_name}"):
+                    del st.session_state[k]
+            st.cache_data.clear()
+            st.rerun()
 
     processed_any = False
     if uploaded_files:

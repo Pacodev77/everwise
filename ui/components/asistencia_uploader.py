@@ -15,11 +15,22 @@ def render_asistencia_uploader(sede_actual):
             f"**Motor Inteligente de Asistencia ({sede_actual})**: Sube el archivo Excel o CSV (Reporte mensual por campus o bitácora de checador). "
             f"El sistema detecta automáticamente la estructura, calcula asistencias por nivel y extrae métricas de colaboradores."
         )
-        uploaded_file = st.file_uploader(
-            f"Cargar archivo de asistencia", 
-            type=["csv", "xlsx", "xls", "tsv", "txt"], 
-            key=f"asist_{sede_actual.lower().replace(' ', '_')}"
-        )
+        col_up, col_del = st.columns([3, 1])
+        with col_up:
+            uploaded_file = st.file_uploader(
+                f"Cargar archivo de asistencia", 
+                type=["csv", "xlsx", "xls", "tsv", "txt"], 
+                key=f"asist_{sede_actual.lower().replace(' ', '_')}"
+            )
+        with col_del:
+            st.write("")
+            st.write("")
+            if st.button(f"Eliminar archivo ({sede_actual})", key=f"btn_del_asist_top_{sede_actual.lower().replace(' ', '_')}", use_container_width=True, type="secondary"):
+                if f"asistencia_data_{sede_actual}" in st.session_state:
+                    del st.session_state[f"asistencia_data_{sede_actual}"]
+                delete_attendance_data(sede_actual)
+                st.cache_data.clear()
+                st.rerun()
         
         if uploaded_file is not None:
             try:

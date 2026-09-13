@@ -126,12 +126,13 @@ if clave_datos in st.session_state:
     kpis_reales = calcular_kpis_ejecutivos(st.session_state[clave_datos])
 # ===
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Resumen Ejecutivo", 
     "Desempeño Académico", 
     "Clima Escolar", 
     "Disciplina", 
-    "Uso de Aplicaciones"
+    "Uso de Aplicaciones",
+    "Práctica Docente"
 ])
 
 # ===============================================
@@ -245,27 +246,20 @@ with tab2:
     render_academico_section(sede_actual)
 
 with tab3:
-    st.markdown("### Mapa de Calor - Indicador de Clima Escolar (ICE)")
-    if not render_campus_dynamic_view("clima", sede_actual):
-        st.altair_chart(chart_clima_heatmap(df_clima), use_container_width=True)
-        st.markdown("### Distribución de Respuestas")
-        st.altair_chart(chart_clima_barras(df_clima), use_container_width=True)
-        st.info("**Lectura ejecutiva:** Nuevo Sur presenta altos índices de satisfacción. Se recomienda mantener prácticas actuales, pero reforzar matematicas.")
+    from ui.components.clima_seccion import render_clima_section
+    render_clima_section(sede_actual)
 
 with tab4:
-    st.markdown("### Panel de Control de Disciplina e Inclusión")
-    if not render_campus_dynamic_view("disc", sede_actual):
-        cd1, cd2 = st.columns(2)
-        with cd1:
-            st.markdown("**Radar de Casos Especiales (Activos)**")
-            st.dataframe(df_casos, hide_index=True, use_container_width=True)
-        with cd2:
-            st.markdown("**Alertas por Cartas Compromiso**")
-            st.dataframe(df_cartas, hide_index=True, use_container_width=True)
+    from ui.components.disciplina_seccion import render_disciplina_section
+    render_disciplina_section(sede_actual)
 
 with tab5:
     from ui.components.uso_aplicaciones_seccion import render_uso_aplicaciones_section
     render_uso_aplicaciones_section(sede_actual)
+
+with tab6:
+    from ui.components.practica_docente_seccion import render_practica_docente_section
+    render_practica_docente_section(sede_actual)
 
 
 # Footer
