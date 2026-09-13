@@ -247,3 +247,37 @@ def chart_disciplina_cartas(df_cartas: pd.DataFrame):
         )
         return (arc + text).properties(height=240).configure_view(stroke='transparent')
 
+def chart_comparativa_indice_compuesto(df_res: pd.DataFrame):
+    """Gráfico de líneas con proyecciones y meta 85% para el Índice Compuesto Institucional."""
+    rule_df = pd.DataFrame({'meta': [85.0], 'label': ['Meta Institucional: 85%']})
+    rule = alt.Chart(rule_df).mark_rule(color='#ef4444', strokeWidth=2, strokeDash=[4, 4]).encode(y='meta:Q')
+    rule_text = alt.Chart(rule_df).mark_text(align='left', dx=10, dy=-6, color='#ef4444', fontWeight='bold', fontSize=12).encode(y='meta:Q', text='label:N')
+
+    base = alt.Chart(df_res).encode(
+        x=alt.X('bimestre:N', title=None, sort=['B1', 'B2', 'B3', 'B4', 'B5'], axis=alt.Axis(labelAngle=0, labelFontSize=12, labelFontWeight='bold')),
+        y=alt.Y('indice:Q', title='Índice Compuesto (%)', scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(format='.0f', grid=True, gridDash=[3, 3], gridColor='#e2e8f0')),
+        color=alt.Color('campus:N', scale=alt.Scale(
+            domain=['Misiones', 'Nuevo Sur', 'San Agustín', 'Global'],
+            range=['#3b82f6', '#8b5cf6', '#10b981', '#0f172a']
+        ), legend=alt.Legend(title=None, orient='top', labelFontSize=12)),
+        strokeDash=alt.StrokeDash('tipo:N', scale=alt.Scale(
+            domain=['Real', 'Proyección'],
+            range=[[0, 0], [6, 4]]
+        ), legend=alt.Legend(title=None, orient='top', labelFontSize=12)),
+        tooltip=[
+            alt.Tooltip('campus:N', title='Campus'),
+            alt.Tooltip('bimestre_label:N', title='Bimestre'),
+            alt.Tooltip('indice:Q', format='.1f', title='Índice (%)'),
+            alt.Tooltip('tipo:N', title='Tipo')
+        ]
+    )
+
+    lines = base.mark_line(strokeWidth=3)
+    points = base.mark_circle(size=60)
+    text = base.mark_text(baseline='bottom', dy=-8, fontWeight='bold', fontSize=11).encode(
+        text=alt.Text('indice:Q', format='.1f')
+    )
+
+    return (lines + points + text + rule + rule_text).properties(height=340).configure_view(stroke='transparent')
+
+

@@ -224,6 +224,10 @@ with tab1:
         df_asistencia = real_global["niveles"].rename(columns={"Nivel": "campus", "Asistencia": "asistencia"})
         df_asistencia['staff_asistencia'] = real_global["staff"]
         
+    # Comparativa Global Multicampus (Índice Compuesto)
+    from ui.components.comparativa_global_seccion import render_comparativa_global_section
+    render_comparativa_global_section(df_academico)
+
     # Análisis Histórico
     render_cycle_comparison(df_asistencia, df_academico, df_asistencia_prev, df_academico_prev, "Global")
 
