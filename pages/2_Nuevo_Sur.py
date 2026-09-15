@@ -49,6 +49,9 @@ campus = CAMPUS["nuevo_sur"]
 # Sidebar
 ciclo_seleccionado = render_sidebar(sede_name="Nuevo Sur")
 
+import importlib
+import src.logic.data_loader
+importlib.reload(src.logic.data_loader)
 from src.logic.data_loader import init_session_state
 init_session_state(ciclo_seleccionado)
 
