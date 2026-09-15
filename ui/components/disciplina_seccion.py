@@ -97,18 +97,22 @@ def render_disciplina_section(sede_actual: str):
             except Exception as e:
                 st.error(f"Error al procesar el archivo de Disciplina: {e}")
 
-    # Obtener datos de session_state, SQLite o Semilla Canónica
+    # Obtener datos de session_state o SQLite para el ciclo activo
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     df_casos = st.session_state.get("disciplina_casos")
     df_cartas = st.session_state.get("disciplina_cartas")
 
     if df_casos is None or df_cartas is None or df_casos.empty:
-        db_casos, db_cartas = load_disciplina_data()
+        db_casos, db_cartas = load_disciplina_data(ciclo_activo)
         if not db_casos.empty and not db_cartas.empty:
             df_casos, df_cartas = db_casos, db_cartas
-        else:
+        elif ciclo_activo == "2025 - 2026":
             df_casos, df_cartas = generar_datos_semilla_disciplina()
-        st.session_state["disciplina_casos"] = df_casos
-        st.session_state["disciplina_cartas"] = df_cartas
+            st.session_state["disciplina_casos"] = df_casos
+            st.session_state["disciplina_cartas"] = df_cartas
+        else:
+            df_casos = pd.DataFrame(columns=["campus", "Violencia Escolar", "Faltas Graves", "Apatía Severa"])
+            df_cartas = pd.DataFrame(columns=["campus", "Firmadas", "Pendientes"])
 
     if sede_actual != "Global":
         df_casos_view = df_casos[df_casos["campus"] == sede_actual] if "campus" in df_casos.columns else df_casos
@@ -116,6 +120,10 @@ def render_disciplina_section(sede_actual: str):
     else:
         df_casos_view = df_casos
         df_cartas_view = df_cartas
+
+    if df_casos_view.empty and df_cartas_view.empty:
+        st.info(f"No hay reportes de Disciplina registrados para el Ciclo Escolar {ciclo_activo} en {sede_actual}.")
+        return
 
     # Cálculo de métricas KPI
     violencia = int(df_casos_view['Violencia Escolar'].sum()) if 'Violencia Escolar' in df_casos_view.columns else 0
@@ -177,12 +185,4 @@ def render_disciplina_section(sede_actual: str):
             st.caption("Cartas Compromiso")
             st.dataframe(df_cartas_view, hide_index=True, use_container_width=True)
 
-    # Lecturas ejecutivas dinámicas
-    lecturas = {
-        "Misiones": "Misiones reporta 6 casos especiales (principalmente Apatía Severa) y mantiene un 83% de cartas compromiso firmadas por padres de familia.",
-        "Nuevo Sur": "Nuevo Sur registra un control disciplinario óptimo con solo 3 casos activos y un 100% de cartas compromiso firmadas.",
-        "San Agustín": "San Agustín cuenta con 4 casos en seguimiento y 80% de avance en firmas de compromisos disciplinares.",
-        "Global": "A nivel institucional existen 13 casos en radar (0 violencia grave), con un 86% general de cartas compromiso formalmente firmadas."
-    }
-    st.info(f"**Lectura ejecutiva:** {lecturas.get(sede_actual, lecturas['Global'])}")
 

@@ -58,9 +58,10 @@ def render_practica_docente_section(sede_actual: str):
     st.markdown(f"### Práctica Docente — {sede_actual}")
     st.caption("Evaluación ejecutiva de competencias pedagógicas, rúbricas de desempeño docente y acompañamiento en aula.")
 
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     clave_state = f"practica_docente_{sede_actual}"
 
-    # Carga desde SQLite / Session State / Semilla Canónica
+    # Carga desde SQLite / Session State / Semilla Canónica para el ciclo activo
     if clave_state not in st.session_state:
         dfs_to_concat = []
         from src.logic.data_loader import get_db_connection
@@ -69,8 +70,12 @@ def render_practica_docente_section(sede_actual: str):
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_docente_data'")
             if cursor.fetchone():
-                query = "SELECT * FROM practica_docente_data" if sede_actual == "Global" else "SELECT * FROM practica_docente_data WHERE campus = ?"
-                params = () if sede_actual == "Global" else (sede_actual,)
+                if sede_actual == "Global":
+                    query = "SELECT * FROM practica_docente_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')"
+                    params = (ciclo_activo, ciclo_activo)
+                else:
+                    query = "SELECT * FROM practica_docente_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))"
+                    params = (sede_actual, ciclo_activo, ciclo_activo)
                 df_db = pd.read_sql(query, conn, params=params)
                 if not df_db.empty:
                     dfs_to_concat.append(df_db)
@@ -78,7 +83,7 @@ def render_practica_docente_section(sede_actual: str):
         except Exception:
             pass
 
-        if not dfs_to_concat:
+        if not dfs_to_concat and ciclo_activo == "2025 - 2026":
             campuses_to_gen = ["Misiones", "Nuevo Sur", "San Agustín"] if sede_actual == "Global" else [sede_actual]
             for c in campuses_to_gen:
                 dfs_to_concat.append(generar_datos_semilla_practica(c))
@@ -97,7 +102,7 @@ def render_practica_docente_section(sede_actual: str):
     metrics = calcular_metricas_ejecutivas_practica(df_docentes)
 
     if df_docentes.empty or not metrics:
-        st.info("No se encontraron evaluaciones de práctica docente disponibles.")
+        st.info(f"No se encontraron evaluaciones de práctica docente registradas para el Ciclo Escolar {ciclo_activo} en {sede_actual}.")
         return
 
     tab_eval, tab_bitacora, tab_gestion = st.tabs([

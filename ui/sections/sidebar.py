@@ -118,24 +118,25 @@ def render_sidebar(sede_name=None):
 
         gestionar_cambio_de_ciclo(ciclo_seleccionado)
 
-        st.write("---")
-        # ── Reset / Reinicio General del Sistema ──
-        if st.button("Reiniciar Sistema", use_container_width=True):
-            st.session_state["mostrar_confirmacion_reset"] = True
+        # ── Reset / Reinicio General del Sistema (Exclusivo Director General en Vista Principal) ──
+        if user_role == "General" and sede_name is None:
+            st.write("---")
+            if st.button("Reiniciar Sistema", use_container_width=True):
+                st.session_state["mostrar_confirmacion_reset"] = True
 
-        if st.session_state.get("mostrar_confirmacion_reset", False):
-            st.error("**ADVERTENCIA DE REINICIO**\n\nSe eliminarán permanentemente todos los archivos cargados, historiales y la base de datos de todos los campus.")
-            col_res1, col_res2 = st.columns(2)
-            with col_res1:
-                if st.button("Sí, borrar todo", type="primary", use_container_width=True, key="btn_confirm_reset_sb"):
-                    from src.logic.data_loader import reset_all_system_data
-                    reset_all_system_data()
-                    st.session_state["mostrar_confirmacion_reset"] = False
-                    st.rerun()
-            with col_res2:
-                if st.button("Cancelar", use_container_width=True, key="btn_cancel_reset_sb"):
-                    st.session_state["mostrar_confirmacion_reset"] = False
-                    st.rerun()
+            if st.session_state.get("mostrar_confirmacion_reset", False):
+                st.error("**ADVERTENCIA DE REINICIO**\n\nSe eliminarán permanentemente todos los archivos cargados, historiales y la base de datos de todos los campus.")
+                col_res1, col_res2 = st.columns(2)
+                with col_res1:
+                    if st.button("Sí, borrar todo", type="primary", use_container_width=True, key="btn_confirm_reset_sb"):
+                        from src.logic.data_loader import reset_all_system_data
+                        reset_all_system_data()
+                        st.session_state["mostrar_confirmacion_reset"] = False
+                        st.rerun()
+                with col_res2:
+                    if st.button("Cancelar", use_container_width=True, key="btn_cancel_reset_sb"):
+                        st.session_state["mostrar_confirmacion_reset"] = False
+                        st.rerun()
 
         st.write("---")
         if st.button("Cerrar Sesión", use_container_width=True):
@@ -143,11 +144,12 @@ def render_sidebar(sede_name=None):
             logout()
 
         # ── Footer / Branding Ejecutivo ──
-        st.markdown("""
+        anio_actual = datetime.datetime.now().year
+        st.markdown(f"""
             <div style='margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid #cbd5e1; font-size: 0.78rem; color: #64748b; text-align: center; line-height: 1.4;'>
                 <div style='font-weight: 700; color: #94a3b8; font-size: 0.85rem; letter-spacing: 0.3px;'>Everwise® v2.1</div>
                 <div style='margin-top: 2px; font-weight: 500;'>Crafted by <span style='font-weight: 700; color: #94a3b8;'>Paco Ruiz</span></div>
-                <div style='font-size: 0.72rem; color: #94a3b8; margin-top: 4px;'>© 2025–2026.</div>
+                <div style='font-size: 0.72rem; color: #94a3b8; margin-top: 4px;'>© {anio_actual}.</div>
             </div>
         """, unsafe_allow_html=True)
 

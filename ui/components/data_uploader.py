@@ -9,6 +9,7 @@ from src.logic.data_loader import (
     delete_academic_data,
     get_academic_history_catalog,
 )
+from ui.components.kpi_cards import kpi_card
 
 
 # ── UPLOADER GLOBAL (app.py) ──────────────────────────────────────────
@@ -288,10 +289,13 @@ def _mostrar_desempeno(resultado: dict):
         cols = st.columns(len(df_des))
         for i, row in df_des.iterrows():
             with cols[i]:
-                st.metric(
-                    label=str(row["Nivel"]),
-                    value=f"{row['pct_desempeno']}%",
-                    help=f"{int(row['en_desempeno'])} de {int(row['total'])} alumnos en desempeño"
+                pct_val = row['pct_desempeno']
+                estado_n = "ok" if pct_val >= 80.0 else ("warning" if pct_val >= 60.0 else "risk")
+                kpi_card(
+                    titulo=f"NIVEL {str(row['Nivel']).upper()}",
+                    valor=f"{pct_val:.1f}%",
+                    delta=f"{int(row['en_desempeno'])} de {int(row['total'])} alumnos",
+                    estado=estado_n
                 )
 
         # Detalle por nivel con gráfico y tabla

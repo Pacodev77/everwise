@@ -41,7 +41,8 @@ def render_asistencia_section(sede_actual, real_data=None, mostrar_uploader=Fals
         dias_alumnos = real_data.get("dias_alumnos")
         dias_staff = real_data.get("dias_staff")
     else:
-        st.info("Sin datos de asistencia registrados aún. Por favor suba un reporte de asistencia.")
+        ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+        st.info(f"Sin datos de asistencia registrados para el Ciclo Escolar {ciclo_activo} en {sede_actual}. Por favor suba un reporte de asistencia.")
         return
         
     # Badges informativos si hay datos de días registrados

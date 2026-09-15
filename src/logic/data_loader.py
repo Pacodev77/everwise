@@ -34,6 +34,7 @@ def init_audit_table():
                 details TEXT,
                 campus TEXT,
                 bimestre TEXT,
+                ciclo_escolar TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -277,59 +278,112 @@ def reconstruct_attendance_state(campus):
         conn.close()
 
 
-def log_audit_event(username: str, action: str, details: str = "", campus: str = None, bimestre: str = None):
+def log_audit_event(username: str, action: str, details: str = "", campus: str = None, bimestre: str = None, ciclo_escolar: str = None):
     """Registra una acción en la bitácora de auditoría corporativa del CRM."""
     try:
+        ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO audit_logs (username, action, details, campus, bimestre) VALUES (?, ?, ?, ?, ?)",
-            (username or "Sistema", action, details, campus, bimestre)
+            "INSERT INTO audit_logs (username, action, details, campus, bimestre, ciclo_escolar) VALUES (?, ?, ?, ?, ?, ?)",
+            (username or "Sistema", action, details, campus, bimestre, ciclo)
         )
         conn.commit()
         conn.close()
     except Exception:
         pass
 
-def get_recent_audit_logs(limit: int = 50) -> pd.DataFrame:
-    """Recupera los eventos más recientes de la bitácora de auditoría."""
+def get_recent_audit_logs(limit: int = 50, ciclo_escolar: str = None) -> pd.DataFrame:
+    """Recupera los eventos más recientes de la bitácora de auditoría filtrados por ciclo escolar."""
     try:
+        ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+        ensure_schema_has_ciclo_escolar()
         conn = get_db_connection()
         df = pd.read_sql(
-            "SELECT timestamp as Fecha, username as Usuario, action as Acción, details as Detalles, campus as Campus, bimestre as Periodo FROM audit_logs ORDER BY id DESC LIMIT ?", 
+            "SELECT timestamp as Fecha, username as Usuario, action as Acción, details as Detalles, campus as Campus, bimestre as Periodo FROM audit_logs WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026') ORDER BY id DESC LIMIT ?", 
             conn, 
-            params=(limit,)
+            params=(ciclo, ciclo, limit)
         )
         conn.close()
         return df
     except Exception:
         return pd.DataFrame()
 
-def init_session_state():
-    """
-    Inicializa el estado de la sesión leyendo los datos previamente cargados
-    desde la base de datos SQLite, garantizando la persistencia al recargar la página.
-    """
-    if "session_initialized" in st.session_state:
-        return
-        
-    st.session_state["session_initialized"] = True
-    
+def ensure_schema_has_ciclo_escolar():
+    """Garantiza que todas las tablas de la BD SQLite tengan la columna ciclo_escolar."""
     if not os.path.exists(DB_PATH):
         return
-        
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        tables = [
+            "academic_data", "attendance_data", "normalized_attendance", 
+            "resumen_diario_nivel", "clima_data", "disciplina_casos", 
+            "disciplina_cartas", "practica_apps_kpis", "practica_correlacion", 
+            "practica_docente_data", "preescolar_qualitative_data",
+            "ixl_diagnostics", "progrentis_data", "audit_logs"
+        ]
+        for t in tables:
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{t}'")
+            if cursor.fetchone():
+                cursor.execute(f"PRAGMA table_info({t})")
+                cols = [row[1] for row in cursor.fetchall()]
+                if "ciclo_escolar" not in cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE {t} ADD COLUMN ciclo_escolar TEXT DEFAULT '2025 - 2026'")
+                        conn.commit()
+                    except Exception:
+                        pass
+        conn.close()
+    except Exception:
+        pass
+
+def init_session_state(ciclo_escolar: str = None):
+    """
+    Inicializa el estado de la sesión leyendo los datos previamente cargados
+    desde la base de datos SQLite para el ciclo escolar activo.
+    """
+    if ciclo_escolar is None:
+        ciclo_escolar = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
         
-        # 1. Cargar Datos Académicos
+    st.session_state["ciclo_escolar_activo"] = ciclo_escolar
+
+    current_init = st.session_state.get("session_initialized_cycle")
+    if current_init == ciclo_escolar:
+        return
+
+    st.session_state["session_initialized_cycle"] = ciclo_escolar
+    ensure_schema_has_ciclo_escolar()
+
+    # Limpiar claves de módulos anteriores para dar paso a los datos del ciclo actual
+    prefixes = (
+        "ixl_", "progrentis_", "academico_", "asistencia_", 
+        "clima_", "disciplina_", "practica_", "last_up_", "df_", "preescolar_"
+    )
+    keys_to_clean = [
+        k for k in list(st.session_state.keys())
+        if k.startswith(prefixes) and k != "cycle_vault"
+    ]
+    for k in keys_to_clean:
+        del st.session_state[k]
+
+    if not os.path.exists(DB_PATH):
+        return
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 1. Cargar Datos Académicos por ciclo
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='academic_data'")
         if cursor.fetchone():
-            df_acad = pd.read_sql("SELECT * FROM academic_data", conn)
+            df_acad = pd.read_sql(
+                "SELECT * FROM academic_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", 
+                conn, 
+                params=(ciclo_escolar, ciclo_escolar)
+            )
             if not df_acad.empty:
                 from src.logic.academic_processor import calcular_desempeno_por_nivel, calcular_promedios_por_nivel
-                
-                # Agrupar e inyectar cada combinación campus/bimestre
                 for (campus, bimestre), group in df_acad.groupby(["campus", "bimestre"]):
                     res = {
                         "campus": campus,
@@ -341,8 +395,7 @@ def init_session_state():
                         "error": None
                     }
                     st.session_state[f"academico_{campus}_{bimestre}"] = res
-                
-                # Asignar la última versión como "academico_propio_{campus}"
+
                 def _sort_bim(b):
                     s = str(b).upper().strip()
                     if s.startswith('B') and s[1:].isdigit():
@@ -355,95 +408,68 @@ def init_session_state():
                         sorted_bims = sorted(bimestres, key=_sort_bim)
                         latest_bim = sorted_bims[-1]
                         st.session_state[f"academico_propio_{campus}"] = st.session_state[f"academico_{campus}_{latest_bim}"]
-                        
-                        # Acumular el historial para deltas
-                        for bim in sorted_bims:
-                            clave_hist = f"historial_bimestres_{campus}"
-                            if clave_hist not in st.session_state:
-                                st.session_state[clave_hist] = {}
-                            bim_df = campus_df[campus_df["bimestre"] == bim]
-                            
-                            # Evitar KeyErrors o nulos al calcular promedio dominio
-                            cols_materias = ["Language Arts", "Matemáticas", "Español"]
-                            for col in cols_materias:
-                                if col not in bim_df.columns:
-                                    bim_df[col] = 0.0
-                                    
-                            promedio_dominio = (
-                                bim_df["Language Arts"].dropna().mean() +
-                                bim_df["Matemáticas"].dropna().mean() +
-                                bim_df["Español"].dropna().mean()
-                            ) / 3.0 / 10.0
-                            if pd.isna(promedio_dominio):
-                                promedio_dominio = 0.0
-                            st.session_state[clave_hist][bim] = round(promedio_dominio, 3)
 
-        # 2. Cargar Asistencia (desde normalized_attendance o attendance_data)
+        # 2. Cargar Asistencia por ciclo
         campuses_stored = set()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='normalized_attendance'")
         if cursor.fetchone():
-            cursor.execute("SELECT DISTINCT campus FROM normalized_attendance")
+            cursor.execute("SELECT DISTINCT campus FROM normalized_attendance WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo_escolar, ciclo_escolar))
             campuses_stored.update([row[0] for row in cursor.fetchall() if row[0]])
-            
+
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
         if cursor.fetchone():
-            cursor.execute("SELECT DISTINCT campus FROM attendance_data")
+            cursor.execute("SELECT DISTINCT campus FROM attendance_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo_escolar, ciclo_escolar))
             campuses_stored.update([row[0] for row in cursor.fetchall() if row[0]])
-            
+
         for campus in campuses_stored:
-            state_data = reconstruct_attendance_state(campus)
+            state_data = reconstruct_attendance_state(campus, ciclo_escolar)
             if state_data:
                 st.session_state[f"asistencia_data_{campus}"] = state_data
 
-        # 3. Cargar Clima Escolar
+        # 3. Cargar Clima Escolar por ciclo
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='clima_data'")
         if cursor.fetchone():
-            df_clima = pd.read_sql("SELECT * FROM clima_data", conn)
+            df_clima = pd.read_sql("SELECT * FROM clima_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
             if not df_clima.empty:
                 st.session_state["clima_data_global"] = df_clima
 
-        # 4. Cargar Disciplina (Casos y Cartas)
+        # 4. Cargar Disciplina por ciclo
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='disciplina_casos'")
         if cursor.fetchone():
-            df_casos = pd.read_sql("SELECT * FROM disciplina_casos", conn)
+            df_casos = pd.read_sql("SELECT * FROM disciplina_casos WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
             if not df_casos.empty:
-                st.session_state["disciplina_casos_global"] = df_casos
-                
+                st.session_state["disciplina_casos"] = df_casos
+
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='disciplina_cartas'")
         if cursor.fetchone():
-            df_cartas = pd.read_sql("SELECT * FROM disciplina_cartas", conn)
+            df_cartas = pd.read_sql("SELECT * FROM disciplina_cartas WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
             if not df_cartas.empty:
-                st.session_state["disciplina_cartas_global"] = df_cartas
+                st.session_state["disciplina_cartas"] = df_cartas
 
-        # 5. Cargar Práctica Docente y Uso de Apps
+        # 5. Cargar Práctica Docente y Uso de Apps por ciclo
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_apps_kpis'")
         if cursor.fetchone():
-            df_apps = pd.read_sql("SELECT * FROM practica_apps_kpis", conn)
+            df_apps = pd.read_sql("SELECT * FROM practica_apps_kpis WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
             if not df_apps.empty:
-                st.session_state["practica_apps_global"] = df_apps
-                
+                st.session_state["practica_apps_kpis"] = df_apps
+
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_correlacion'")
         if cursor.fetchone():
-            df_corr = pd.read_sql("SELECT * FROM practica_correlacion", conn)
+            df_corr = pd.read_sql("SELECT * FROM practica_correlacion WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
             if not df_corr.empty:
-                st.session_state["practica_corr_global"] = df_corr
+                st.session_state["practica_correlacion"] = df_corr
 
         conn.close()
-    except Exception as e:
-        # Fallback silencioso para no romper la app si la base está bloqueada
+    except Exception:
         pass
 
 # --- Funciones de Persistencia ---
 
-def save_academic_data(campus, bimestre, df):
-    """
-    Guarda y consolida los datos académicos limpios en SQLite.
-    Realiza un upsert incremental a nivel de (campus, bimestre, MATRICULA) para que si se
-    suben archivos de diferentes niveles o secciones por separado, se unifiquen sin sobrescribirse.
-    """
+def save_academic_data(campus, bimestre, df, ciclo_escolar=None):
     if df is None or df.empty or campus == "Desconocido" or bimestre == "B?":
         return
-        
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    ensure_schema_has_ciclo_escolar()
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -452,78 +478,79 @@ def save_academic_data(campus, bimestre, df):
         if cursor.fetchone():
             try:
                 existing_df = pd.read_sql(
-                    "SELECT * FROM academic_data WHERE campus = ? AND bimestre = ?", 
+                    "SELECT * FROM academic_data WHERE campus = ? AND bimestre = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", 
                     conn, 
-                    params=(campus, bimestre)
+                    params=(campus, bimestre, ciclo, ciclo)
                 )
             except Exception:
                 existing_df = None
-                
+
         df_new = df.copy()
         df_new["campus"] = campus
         df_new["bimestre"] = bimestre
-        
+        df_new["ciclo_escolar"] = ciclo
+
         if existing_df is not None and not existing_df.empty:
-            # Combinar manteniendo MATRICULA única: el nuevo registro actualiza al previo
             df_combined = pd.concat([existing_df, df_new], ignore_index=True)
             if "MATRICULA" in df_combined.columns:
-                df_combined = df_combined.drop_duplicates(subset=["campus", "bimestre", "MATRICULA"], keep="last")
+                df_combined = df_combined.drop_duplicates(subset=["campus", "bimestre", "ciclo_escolar", "MATRICULA"], keep="last")
             else:
-                df_combined = df_combined.drop_duplicates(subset=["campus", "bimestre", "ALUMNO"], keep="last")
-            
-            cursor.execute("DELETE FROM academic_data WHERE campus = ? AND bimestre = ?", (campus, bimestre))
+                df_combined = df_combined.drop_duplicates(subset=["campus", "bimestre", "ciclo_escolar", "ALUMNO"], keep="last")
+
+            cursor.execute("DELETE FROM academic_data WHERE campus = ? AND bimestre = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, bimestre, ciclo, ciclo))
             conn.commit()
             df_combined.to_sql("academic_data", conn, if_exists="append", index=False)
             total_guardados = len(df_combined)
         else:
             if "MATRICULA" in df_new.columns:
-                df_new = df_new.drop_duplicates(subset=["campus", "bimestre", "MATRICULA"], keep="last")
+                df_new = df_new.drop_duplicates(subset=["campus", "bimestre", "ciclo_escolar", "MATRICULA"], keep="last")
             df_new.to_sql("academic_data", conn, if_exists="append", index=False)
             total_guardados = len(df_new)
-            
-        # Registrar evento de auditoría
+
         username = st.session_state.get("username", "Sistema") if "username" in st.session_state else "Sistema"
-        log_audit_event(username, "CARGA_ACADEMICA", f"Guardados {total_guardados} alumnos", campus, bimestre)
+        log_audit_event(username, "CARGA_ACADEMICA", f"Guardados {total_guardados} alumnos ({ciclo})", campus, bimestre)
         st.cache_data.clear()
     finally:
         conn.close()
 
-def delete_academic_data(campus, bimestre=None):
-    """Elimina los datos académicos del campus (o bimestre específico) en SQLite y limpia la caché."""
+def delete_academic_data(campus, bimestre=None, ciclo_escolar=None):
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='academic_data'")
         if cursor.fetchone():
             if bimestre:
-                cursor.execute("DELETE FROM academic_data WHERE campus = ? AND bimestre = ?", (campus, bimestre))
+                cursor.execute("DELETE FROM academic_data WHERE campus = ? AND bimestre = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, bimestre, ciclo, ciclo))
             else:
-                cursor.execute("DELETE FROM academic_data WHERE campus = ?", (campus,))
+                cursor.execute("DELETE FROM academic_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
             conn.commit()
-            
+
             username = st.session_state.get("username", "Sistema") if "username" in st.session_state else "Sistema"
-            log_audit_event(username, "ELIMINACION_ACADEMICA", f"Periodo {bimestre if bimestre else 'Todo'}", campus, bimestre)
+            log_audit_event(username, "ELIMINACION_ACADEMICA", f"Periodo {bimestre if bimestre else 'Todo'} ({ciclo})", campus, bimestre)
         st.cache_data.clear()
     finally:
         conn.close()
 
-def get_academic_history_catalog():
-    """Retorna un catálogo estructurado de todos los campus y bimestres almacenados en la base de datos."""
+def get_academic_history_catalog(ciclo_escolar: str = None):
+    if ciclo_escolar is None:
+        ciclo_escolar = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     if not os.path.exists(DB_PATH):
         return {}
     try:
+        ensure_schema_has_ciclo_escolar()
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='academic_data'")
         if not cursor.fetchone():
             conn.close()
             return {}
-        df_all = pd.read_sql("SELECT * FROM academic_data", conn)
+        df_all = pd.read_sql("SELECT * FROM academic_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
         conn.close()
-        
+
         if df_all.empty:
             return {}
-            
+
         from src.logic.academic_processor import calcular_desempeno_por_nivel, calcular_promedios_por_nivel
         catalog = {}
         for (campus, bimestre), group in df_all.groupby(["campus", "bimestre"]):
@@ -542,173 +569,217 @@ def get_academic_history_catalog():
     except Exception:
         return {}
 
-def save_attendance_data(campus, df_niveles, staff_kpi, df_canonico=None, df_resumen=None):
-    """Guarda y consolida los datos de asistencia en SQLite."""
+def save_attendance_data(campus, df_niveles, staff_kpi, df_canonico=None, df_resumen=None, ciclo_escolar=None):
     if df_niveles is None or df_niveles.empty or campus == "Desconocido":
         return
-        
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    ensure_schema_has_ciclo_escolar()
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        
-        # Asegurar inicialización de tablas
         init_attendance_tables_conn(conn)
-        
-        # 1. Guardar df_niveles en la tabla agregada heredada
+
         df_to_save = df_niveles.copy()
         df_to_save["campus"] = campus
+        df_to_save["ciclo_escolar"] = ciclo
         df_to_save["staff_asistencia"] = float(staff_kpi) if staff_kpi is not None else 0.85
-        
+
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
         if cursor.fetchone():
-            cursor.execute("DELETE FROM attendance_data WHERE campus = ?", (campus,))
+            cursor.execute("DELETE FROM attendance_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
             conn.commit()
-            
+
         df_to_save.to_sql("attendance_data", conn, if_exists="append", index=False)
-        
-        # 2. Guardar df_canonico en normalized_attendance
+
         if df_canonico is not None and not df_canonico.empty:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='normalized_attendance'")
             if cursor.fetchone():
-                cursor.execute("DELETE FROM normalized_attendance WHERE campus = ?", (campus,))
+                cursor.execute("DELETE FROM normalized_attendance WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
                 conn.commit()
             df_canon_save = df_canonico.copy()
+            df_canon_save['ciclo_escolar'] = ciclo
             df_canon_save['fecha'] = df_canon_save['fecha'].astype(str)
             df_canon_save['hora_entrada'] = df_canon_save['hora_entrada'].apply(lambda x: str(x) if x is not None else None)
             df_canon_save['hora_salida'] = df_canon_save['hora_salida'].apply(lambda x: str(x) if x is not None else None)
             df_canon_save.to_sql("normalized_attendance", conn, if_exists="append", index=False)
-            
-        # 3. Guardar df_resumen en resumen_diario_nivel
+
         if df_resumen is not None and not df_resumen.empty:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resumen_diario_nivel'")
             if cursor.fetchone():
-                cursor.execute("DELETE FROM resumen_diario_nivel WHERE campus = ?", (campus,))
+                cursor.execute("DELETE FROM resumen_diario_nivel WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
                 conn.commit()
             df_resumen_save = df_resumen.copy()
+            df_resumen_save['ciclo_escolar'] = ciclo
             df_resumen_save['fecha'] = df_resumen_save['fecha'].astype(str)
             df_resumen_save.to_sql("resumen_diario_nivel", conn, if_exists="append", index=False)
-            
+
         username = st.session_state.get("username", "Sistema") if "username" in st.session_state else "Sistema"
-        log_audit_event(username, "CARGA_ASISTENCIA", f"Guardada asistencia staff: {staff_kpi:.1%}", campus)
+        log_audit_event(username, "CARGA_ASISTENCIA", f"Guardada asistencia staff: {staff_kpi:.1%} ({ciclo})", campus)
         st.cache_data.clear()
     finally:
         conn.close()
 
-def delete_attendance_data(campus):
-    """Elimina los datos de asistencia del campus en SQLite y limpia la caché."""
+def delete_attendance_data(campus, ciclo_escolar=None):
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
         if cursor.fetchone():
-            cursor.execute("DELETE FROM attendance_data WHERE campus = ?", (campus,))
-            
+            cursor.execute("DELETE FROM attendance_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
+
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='normalized_attendance'")
         if cursor.fetchone():
-            cursor.execute("DELETE FROM normalized_attendance WHERE campus = ?", (campus,))
-            
+            cursor.execute("DELETE FROM normalized_attendance WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
+
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resumen_diario_nivel'")
         if cursor.fetchone():
-            cursor.execute("DELETE FROM resumen_diario_nivel WHERE campus = ?", (campus,))
-            
+            cursor.execute("DELETE FROM resumen_diario_nivel WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
+
         conn.commit()
         st.cache_data.clear()
     finally:
         conn.close()
 
-def save_clima_data(df_clima):
-    """Guarda los datos de clima escolar en SQLite."""
+def reconstruct_attendance_state(campus, ciclo_escolar=None):
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    if not os.path.exists(DB_PATH):
+        return None
+    ensure_schema_has_ciclo_escolar()
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
+        if cursor.fetchone():
+            df_att = pd.read_sql("SELECT * FROM attendance_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", conn, params=(campus, ciclo, ciclo))
+            if not df_att.empty:
+                staff_val = df_att["staff_asistencia"].iloc[0] if "staff_asistencia" in df_att.columns else 0.85
+                cols_niv = [c for c in ["Nivel", "Asistencia"] if c in df_att.columns]
+                return {
+                    "niveles": df_att[cols_niv],
+                    "staff": float(staff_val)
+                }
+        return None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+def save_clima_data(df_clima, ciclo_escolar=None):
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    ensure_schema_has_ciclo_escolar()
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        df_save = df_clima.copy()
+        df_save["ciclo_escolar"] = ciclo
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='clima_data'")
         if cursor.fetchone():
-            cursor.execute("DELETE FROM clima_data")
+            cursor.execute("DELETE FROM clima_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo, ciclo))
             conn.commit()
-        df_clima.to_sql("clima_data", conn, if_exists="replace", index=False)
+        df_save.to_sql("clima_data", conn, if_exists="append", index=False)
         st.cache_data.clear()
     finally:
         conn.close()
 
-def save_disciplina_data(df_casos, df_cartas):
-    """Guarda los datos de disciplina en SQLite."""
-    conn = get_db_connection()
-    try:
-        # Casos
-        conn.execute("DROP TABLE IF EXISTS disciplina_casos")
-        df_casos.to_sql("disciplina_casos", conn, if_exists="replace", index=False)
-        
-        # Cartas
-        conn.execute("DROP TABLE IF EXISTS disciplina_cartas")
-        df_cartas.to_sql("disciplina_cartas", conn, if_exists="replace", index=False)
-        st.cache_data.clear()
-    finally:
-        conn.close()
-
-def save_practica_data(df_apps_kpis, df_correlacion):
-    """Guarda los datos de práctica docente en SQLite."""
-    conn = get_db_connection()
-    try:
-        # KPIs
-        conn.execute("DROP TABLE IF EXISTS practica_apps_kpis")
-        df_apps_kpis.to_sql("practica_apps_kpis", conn, if_exists="replace", index=False)
-        
-        # Correlación
-        conn.execute("DROP TABLE IF EXISTS practica_correlacion")
-        df_correlacion.to_sql("practica_correlacion", conn, if_exists="replace", index=False)
-        st.cache_data.clear()
-    finally:
-        conn.close()
-
-def save_practica_docente_data(campus: str, df: pd.DataFrame):
-    """Guarda y consolida los datos de rúbricas docentes en SQLite."""
-    if df is None or df.empty:
-        return
+def save_disciplina_data(df_casos, df_cartas, ciclo_escolar=None):
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    ensure_schema_has_ciclo_escolar()
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
+        df_casos_save = df_casos.copy()
+        df_casos_save["ciclo_escolar"] = ciclo
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='disciplina_casos'")
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM disciplina_casos WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo, ciclo))
+        df_casos_save.to_sql("disciplina_casos", conn, if_exists="append", index=False)
+
+        df_cartas_save = df_cartas.copy()
+        df_cartas_save["ciclo_escolar"] = ciclo
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='disciplina_cartas'")
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM disciplina_cartas WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo, ciclo))
+        df_cartas_save.to_sql("disciplina_cartas", conn, if_exists="append", index=False)
+        st.cache_data.clear()
+    finally:
+        conn.close()
+
+def save_practica_data(df_apps_kpis, df_correlacion, ciclo_escolar=None):
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    ensure_schema_has_ciclo_escolar()
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        df_apps_save = df_apps_kpis.copy()
+        df_apps_save["ciclo_escolar"] = ciclo
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_apps_kpis'")
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM practica_apps_kpis WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo, ciclo))
+        df_apps_save.to_sql("practica_apps_kpis", conn, if_exists="append", index=False)
+
+        df_corr_save = df_correlacion.copy()
+        df_corr_save["ciclo_escolar"] = ciclo
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_correlacion'")
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM practica_correlacion WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo, ciclo))
+        df_corr_save.to_sql("practica_correlacion", conn, if_exists="append", index=False)
+        st.cache_data.clear()
+    finally:
+        conn.close()
+
+def save_practica_docente_data(campus: str, df: pd.DataFrame, ciclo_escolar=None):
+    if df is None or df.empty:
+        return
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    ensure_schema_has_ciclo_escolar()
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        df_save = df.copy()
+        df_save["ciclo_escolar"] = ciclo
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_docente_data'")
-        if not cursor.fetchone():
-            df.to_sql("practica_docente_data", conn, if_exists="replace", index=False)
-        else:
+        if cursor.fetchone():
             if campus != "Global":
-                cursor.execute("DELETE FROM practica_docente_data WHERE campus = ?", (campus,))
+                cursor.execute("DELETE FROM practica_docente_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
             else:
-                cursor.execute("DELETE FROM practica_docente_data")
+                cursor.execute("DELETE FROM practica_docente_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo, ciclo))
             conn.commit()
-            df.to_sql("practica_docente_data", conn, if_exists="append", index=False)
-        
+        df_save.to_sql("practica_docente_data", conn, if_exists="append", index=False)
         username = st.session_state.get("username", "Sistema") if "username" in st.session_state else "Sistema"
-        log_audit_event(username, "CARGA_PRACTICA_DOCENTE", f"Guardados {len(df)} registros de evaluación docente", campus)
+        log_audit_event(username, "CARGA_PRACTICA_DOCENTE", f"Guardados {len(df)} registros ({ciclo})", campus)
         st.cache_data.clear()
     finally:
         conn.close()
 
-def save_preescolar_data(campus: str, df: pd.DataFrame):
-    """Guarda y consolida las evaluaciones cualitativas de Preescolar en SQLite."""
+def save_preescolar_data(campus: str, df: pd.DataFrame, ciclo_escolar=None):
     if df is None or df.empty:
         return
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    ensure_schema_has_ciclo_escolar()
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
+        df_save = df.copy()
+        df_save["ciclo_escolar"] = ciclo
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='preescolar_qualitative_data'")
-        if not cursor.fetchone():
-            df.to_sql("preescolar_qualitative_data", conn, if_exists="replace", index=False)
-        else:
+        if cursor.fetchone():
             if campus != "Global":
-                cursor.execute("DELETE FROM preescolar_qualitative_data WHERE campus = ?", (campus,))
+                cursor.execute("DELETE FROM preescolar_qualitative_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (campus, ciclo, ciclo))
             else:
-                cursor.execute("DELETE FROM preescolar_qualitative_data")
+                cursor.execute("DELETE FROM preescolar_qualitative_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", (ciclo, ciclo))
             conn.commit()
-            df.to_sql("preescolar_qualitative_data", conn, if_exists="append", index=False)
+        df_save.to_sql("preescolar_qualitative_data", conn, if_exists="append", index=False)
         st.cache_data.clear()
     finally:
         conn.close()
 
-def load_preescolar_data(campus: str = None) -> pd.DataFrame:
-    """Carga los datos cualitativos de Preescolar desde SQLite."""
+def load_preescolar_data(campus: str = None, ciclo_escolar: str = None) -> pd.DataFrame:
+    if ciclo_escolar is None:
+        ciclo_escolar = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     if not os.path.exists(DB_PATH):
         return pd.DataFrame()
+    ensure_schema_has_ciclo_escolar()
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -716,33 +787,38 @@ def load_preescolar_data(campus: str = None) -> pd.DataFrame:
         if not cursor.fetchone():
             return pd.DataFrame()
         if campus and campus != "Global":
-            return pd.read_sql_query("SELECT * FROM preescolar_qualitative_data WHERE campus = ?", conn, params=(campus,))
-        return pd.read_sql_query("SELECT * FROM preescolar_qualitative_data", conn)
+            return pd.read_sql_query(
+                "SELECT * FROM preescolar_qualitative_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", 
+                conn, params=(campus, ciclo_escolar, ciclo_escolar)
+            )
+        return pd.read_sql_query(
+            "SELECT * FROM preescolar_qualitative_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", 
+            conn, params=(ciclo_escolar, ciclo_escolar)
+        )
     except Exception:
         return pd.DataFrame()
     finally:
         conn.close()
 
-
 # --- Funciones de Carga Inteligente de Vistas ---
 
 @st.cache_data
-def load_global_data():
-    """Carga los promedios globales de asistencia y dominio desde la base de datos."""
+def load_global_data(ciclo_escolar: str = "2025 - 2026"):
+    """Carga los promedios globales de asistencia y dominio desde la base de datos para el ciclo escolar especificado."""
     df_asistencia = pd.DataFrame(columns=["campus", "asistencia"])
     df_academico = pd.DataFrame(columns=["campus", "dominio"])
     df_asistencia_prev = pd.DataFrame(columns=["campus", "asistencia"])
     df_academico_prev = pd.DataFrame(columns=["campus", "dominio"])
-    
+
     if os.path.exists(DB_PATH):
         try:
+            ensure_schema_has_ciclo_escolar()
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            
-            # 1. Reconstruir asistencia desde tablas normalizadas/resumen primero
+
             rows_ast = []
             for c in ["Misiones", "Nuevo Sur", "San Agustín"]:
-                st_data = reconstruct_attendance_state(c)
+                st_data = reconstruct_attendance_state(c, ciclo_escolar)
                 if st_data and "niveles" in st_data and isinstance(st_data["niveles"], pd.DataFrame) and not st_data["niveles"].empty:
                     mean_a = st_data["niveles"]["Asistencia"].mean()
                     if pd.notna(mean_a) and mean_a > 0:
@@ -752,25 +828,25 @@ def load_global_data():
             else:
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
                 if cursor.fetchone():
-                    df_att = pd.read_sql("SELECT campus, Asistencia FROM attendance_data", conn)
+                    df_att = pd.read_sql("SELECT campus, Asistencia FROM attendance_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
                     if not df_att.empty:
                         df_att_grouped = df_att.groupby("campus")["Asistencia"].mean().reset_index()
                         df_asistencia = df_att_grouped.rename(columns={"Asistencia": "asistencia"})
-            
+
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='academic_data'")
             if cursor.fetchone():
-                df_acad_all = pd.read_sql("SELECT campus, bimestre, [Language Arts], [Matemáticas], [Español] FROM academic_data", conn)
+                df_acad_all = pd.read_sql("SELECT campus, bimestre, [Language Arts], [Matemáticas], [Español] FROM academic_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
                 if not df_acad_all.empty:
                     rows = []
                     for campus, campus_df in df_acad_all.groupby("campus"):
                         latest_bim = sorted(campus_df["bimestre"].unique())[-1]
                         latest_df = campus_df[campus_df["bimestre"] == latest_bim]
-                        
+
                         cols_needed = ["Language Arts", "Matemáticas", "Español"]
                         for col in cols_needed:
                             if col not in latest_df.columns:
                                 latest_df[col] = 0.0
-                                
+
                         mean_grade = (
                             latest_df["Language Arts"].dropna().mean() +
                             latest_df["Matemáticas"].dropna().mean() +
@@ -783,77 +859,60 @@ def load_global_data():
             conn.close()
         except Exception:
             pass
-            
+
     return df_asistencia, df_academico, df_asistencia_prev, df_academico_prev
 
 def obtener_datos_por_ciclo(ciclo: str, df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25):
-    """Ajusta dinámicamente los dataframes de asistencia y académico según el ciclo escolar seleccionado."""
-    ciclo_clean = str(ciclo).strip() if ciclo else ""
-    if ciclo_clean in ["2026 - 2027", "2025 - 2026"] or not ciclo_clean:
-        return df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25
-    elif ciclo_clean == "2024 - 2025":
-        df_ast_23_24 = df_ast_24_25.copy()
-        if not df_ast_23_24.empty and "asistencia" in df_ast_23_24.columns:
-            df_ast_23_24["asistencia"] = (df_ast_23_24["asistencia"] - 0.02).clip(0, 1)
-        df_aca_23_24 = df_aca_24_25.copy()
-        if not df_aca_23_24.empty and "dominio" in df_aca_23_24.columns:
-            df_aca_23_24["dominio"] = (df_aca_23_24["dominio"] - 0.03).clip(0, 1)
-        return df_ast_24_25, df_aca_24_25, df_ast_23_24, df_aca_23_24
-    else:
-        if not df_ast_25_26.empty or not df_aca_25_26.empty:
-            return df_ast_25_26, df_aca_25_26, df_ast_24_25, df_aca_24_25
-        df_ast_23_24 = df_ast_24_25.copy()
-        if not df_ast_23_24.empty and "asistencia" in df_ast_23_24.columns:
-            df_ast_23_24["asistencia"] = (df_ast_23_24["asistencia"] - 0.02).clip(0, 1)
-        df_aca_23_24 = df_aca_24_25.copy()
-        if not df_aca_23_24.empty and "dominio" in df_aca_23_24.columns:
-            df_aca_23_24["dominio"] = (df_aca_23_24["dominio"] - 0.03).clip(0, 1)
-        return df_ast_23_24, df_aca_23_24, df_ast_24_25, df_aca_24_25
-
+    """Carga y retorna dinámicamente los dataframes de asistencia y académico según el ciclo escolar activo."""
+    if not ciclo:
+        ciclo = "2025 - 2026"
+    df_ast, df_aca, df_ast_prev, df_aca_prev = load_global_data(ciclo)
+    return df_ast, df_aca, df_ast_prev, df_aca_prev
 
 @st.cache_data
-def load_apps_data():
+def load_apps_data(ciclo_escolar: str = "2025 - 2026"):
     df_apps_kpis = pd.DataFrame(columns=['campus', 'Plataforma', 'Uso Efectivo (%)'])
     df_correlacion = pd.DataFrame(columns=["campus", "Grupo", "Plataforma", "Práctica (%)", "Resultado (%)"])
-    
+
     if os.path.exists(DB_PATH):
         try:
+            ensure_schema_has_ciclo_escolar()
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_apps_kpis'")
             if cursor.fetchone():
-                df_real_kpis = pd.read_sql("SELECT * FROM practica_apps_kpis", conn)
+                df_real_kpis = pd.read_sql("SELECT * FROM practica_apps_kpis WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
                 if not df_real_kpis.empty:
                     df_apps_kpis = df_real_kpis
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practica_correlacion'")
             if cursor.fetchone():
-                df_real_corr = pd.read_sql("SELECT * FROM practica_correlacion", conn)
+                df_real_corr = pd.read_sql("SELECT * FROM practica_correlacion WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
                 if not df_real_corr.empty:
                     df_correlacion = df_real_corr
             conn.close()
         except Exception:
             pass
-            
+
     return df_apps_kpis, df_correlacion
 
 @st.cache_data
-def load_academico_bloques():
-    """Carga comparativa de bloques académicos únicamente si existen en la base de datos."""
+def load_academico_bloques(ciclo_escolar: str = "2025 - 2026"):
     empty_df = pd.DataFrame(columns=["campus", "Bloque", "Matemáticas", "Español", "Language Arts"])
-    
+
     if os.path.exists(DB_PATH):
         try:
+            ensure_schema_has_ciclo_escolar()
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='academic_data'")
             if cursor.fetchone():
-                df_real = pd.read_sql("SELECT campus, bimestre as Bloque, [Language Arts], [Matemáticas], [Español] FROM academic_data", conn)
+                df_real = pd.read_sql("SELECT campus, bimestre as Bloque, [Language Arts], [Matemáticas], [Español] FROM academic_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
                 if not df_real.empty:
                     df_real_grouped = df_real.groupby(["campus", "Bloque"]).mean().reset_index()
                     df_real_grouped["Matemáticas"] = df_real_grouped["Matemáticas"] / 10.0
                     df_real_grouped["Español"] = df_real_grouped["Español"] / 10.0
                     df_real_grouped["Language Arts"] = df_real_grouped["Language Arts"] / 10.0
-                    
+
                     df_real_grouped['sort_order'] = df_real_grouped['Bloque'].apply(
                         lambda b: int(str(b)[1:]) if str(b).startswith('B') and str(b)[1:].isdigit() else 99
                     )
@@ -863,53 +922,53 @@ def load_academico_bloques():
             conn.close()
         except Exception:
             pass
-            
+
     return empty_df
 
 @st.cache_data
-def load_clima_heatmap():
-    """Genera datos ICE de Clima Escolar desde la base de datos."""
+def load_clima_heatmap(ciclo_escolar: str = "2025 - 2026"):
     df = pd.DataFrame(columns=["campus", "Categoría", "Respuesta", "Proporción"])
-    
+
     if os.path.exists(DB_PATH):
         try:
+            ensure_schema_has_ciclo_escolar()
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='clima_data'")
             if cursor.fetchone():
-                df_real = pd.read_sql("SELECT * FROM clima_data", conn)
+                df_real = pd.read_sql("SELECT * FROM clima_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
                 if not df_real.empty:
                     df = df_real
             conn.close()
         except Exception:
             pass
-            
+
     return df
 
 @st.cache_data
-def load_disciplina_data():
-    """Genera datos de Disciplina desde la base de datos."""
+def load_disciplina_data(ciclo_escolar: str = "2025 - 2026"):
     df_casos = pd.DataFrame(columns=["campus", "Violencia Escolar", "Faltas Graves", "Apatía Severa"])
     df_cartas = pd.DataFrame(columns=["campus", "Firmadas", "Pendientes"])
-    
+
     if os.path.exists(DB_PATH):
         try:
+            ensure_schema_has_ciclo_escolar()
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='disciplina_casos'")
             if cursor.fetchone():
-                df_real_casos = pd.read_sql("SELECT * FROM disciplina_casos", conn)
+                df_real_casos = pd.read_sql("SELECT * FROM disciplina_casos WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
                 if not df_real_casos.empty:
                     df_casos = df_real_casos
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='disciplina_cartas'")
             if cursor.fetchone():
-                df_real_cartas = pd.read_sql("SELECT * FROM disciplina_cartas", conn)
+                df_real_cartas = pd.read_sql("SELECT * FROM disciplina_cartas WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')", conn, params=(ciclo_escolar, ciclo_escolar))
                 if not df_real_cartas.empty:
                     df_cartas = df_real_cartas
             conn.close()
         except Exception:
             pass
-            
+
     return df_casos, df_cartas
 
 def save_ixl_diagnostics_data(campus: str, df: pd.DataFrame):

@@ -148,13 +148,19 @@ def _render_submodulo_progrentis(sede_actual: str):
         dfs_to_concat_p = []
         # 1. Cargar desde SQLite
         from src.logic.data_loader import get_db_connection
+        ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='progrentis_data'")
             if cursor.fetchone():
-                query = "SELECT * FROM progrentis_data WHERE campus = ?" if sede_actual != "Global" else "SELECT * FROM progrentis_data"
-                df_p = pd.read_sql(query, conn, params=(sede_actual,) if sede_actual != "Global" else ())
+                if sede_actual != "Global":
+                    query = "SELECT * FROM progrentis_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))"
+                    params = (sede_actual, ciclo_activo, ciclo_activo)
+                else:
+                    query = "SELECT * FROM progrentis_data WHERE ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026')"
+                    params = (ciclo_activo, ciclo_activo)
+                df_p = pd.read_sql(query, conn, params=params)
                 if not df_p.empty:
                     dfs_to_concat_p.append(df_p)
             conn.close()
@@ -168,7 +174,10 @@ def _render_submodulo_progrentis(sede_actual: str):
             if kp in st.session_state and isinstance(st.session_state[kp], dict) and "df_raw" in st.session_state[kp]:
                 df_c_p = st.session_state[kp]["df_raw"]
                 if df_c_p is not None and not df_c_p.empty:
-                    dfs_to_concat_p.append(df_c_p)
+                    if "ciclo_escolar" in df_c_p.columns:
+                        df_c_p = df_c_p[df_c_p["ciclo_escolar"] == ciclo_activo]
+                    if not df_c_p.empty:
+                        dfs_to_concat_p.append(df_c_p)
 
         if dfs_to_concat_p:
             df_p_comb = pd.concat(dfs_to_concat_p, ignore_index=True)
@@ -193,8 +202,9 @@ def _render_submodulo_progrentis(sede_actual: str):
                 "resumen_nivel": resumen_lvl
             }
 
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     if clave_p not in st.session_state or st.session_state[clave_p].get("total_alumnos", 0) == 0:
-        st.info("Sube el archivo de Progrentis para visualizar la métrica de IPD e Índice de Mejora.")
+        st.info(f"Sube el archivo de Progrentis para el Ciclo Escolar {ciclo_activo} en {sede_actual} para visualizar la métrica de IPD e Índice de Mejora.")
         return
 
     data = st.session_state[clave_p]
@@ -266,7 +276,7 @@ def _render_submodulo_progrentis(sede_actual: str):
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM progrentis_data WHERE campus = ?", (sede_actual,))
+            cursor.execute("DELETE FROM progrentis_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", (sede_actual, ciclo_activo, ciclo_activo))
             conn.commit()
             conn.close()
         except Exception:
@@ -397,19 +407,20 @@ def _render_submodulo_ixl(sede_actual: str):
 
     if sede_actual == "Global" or clave_ixl not in st.session_state:
         dfs_to_concat = []
-        # 1. Cargar desde SQLite sólo campus válidos
+        # 1. Cargar desde SQLite sólo campus válidos y ciclo activo
         from src.logic.data_loader import get_db_connection
+        ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ixl_diagnostics'")
             if cursor.fetchone():
                 if sede_actual != "Global":
-                    query = "SELECT * FROM ixl_diagnostics WHERE campus = ?"
-                    params = (sede_actual,)
+                    query = "SELECT * FROM ixl_diagnostics WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))"
+                    params = (sede_actual, ciclo_activo, ciclo_activo)
                 else:
-                    query = "SELECT * FROM ixl_diagnostics WHERE campus IN ('Misiones', 'Nuevo Sur', 'San Agustín')"
-                    params = ()
+                    query = "SELECT * FROM ixl_diagnostics WHERE campus IN ('Misiones', 'Nuevo Sur', 'San Agustín') AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))"
+                    params = (ciclo_activo, ciclo_activo)
                 df_ixl_db = pd.read_sql(query, conn, params=params)
                 if not df_ixl_db.empty:
                     dfs_to_concat.append(df_ixl_db)
@@ -424,7 +435,10 @@ def _render_submodulo_ixl(sede_actual: str):
             if k in st.session_state and isinstance(st.session_state[k], dict) and "df_raw" in st.session_state[k]:
                 df_c = st.session_state[k]["df_raw"]
                 if df_c is not None and not df_c.empty:
-                    dfs_to_concat.append(df_c)
+                    if "ciclo_escolar" in df_c.columns:
+                        df_c = df_c[df_c["ciclo_escolar"] == ciclo_activo]
+                    if not df_c.empty:
+                        dfs_to_concat.append(df_c)
 
         if dfs_to_concat:
             dfs_clean = []
@@ -468,8 +482,9 @@ def _render_submodulo_ixl(sede_actual: str):
                     "resumen_areas": calcular_areas(df_combined)
                 }
 
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     if clave_ixl not in st.session_state or st.session_state[clave_ixl].get("total_alumnos", 0) == 0:
-        st.info("Sube el archivo de diagnóstico IXL para visualizar los niveles de logro y percentiles por grado.")
+        st.info(f"Sube el archivo de diagnóstico IXL para el Ciclo Escolar {ciclo_activo} en {sede_actual} para visualizar los niveles de logro y percentiles por grado.")
         return
 
     res = st.session_state[clave_ixl]

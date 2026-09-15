@@ -4,6 +4,7 @@ import streamlit as st
 import altair as alt
 import pandas as pd
 from src.logic.ixl_processor import procesar_ixl, acumular_ixl, cruzar_con_academico
+from ui.components.kpi_cards import kpi_card
 
 def render_ixl_section(sede_actual: str):
     clave = f"ixl_{sede_actual}"
@@ -56,15 +57,15 @@ def render_ixl_section(sede_actual: str):
     total    = res["total_alumnos"]
     pct_ok   = round(on_above / total * 100, 1)
 
-    k1, k2, k3 = st.columns(3)
+    k1, k2, k3 = st.columns(3, gap="medium")
     with k1:
-        st.metric("Total alumnos", total)
+        kpi_card("TOTAL ALUMNOS", f"{total}", "Evaluación IXL Math", estado="info")
     with k2:
-        st.metric("En nivel o superior", f"{pct_ok}%",
-                  delta="On/Above grade")
+        estado_ixl = "ok" if pct_ok >= 80.0 else ("warning" if pct_ok >= 60.0 else "risk")
+        kpi_card("EN NIVEL O SUPERIOR", f"{pct_ok:.1f}%", "On / Above grade", estado=estado_ixl)
     with k3:
-        mejor_grado = df_grado.loc[df_grado["pct_on_above"].idxmax(), "Grade"]
-        st.metric("Mejor grado", mejor_grado)
+        mejor_grado = df_grado.loc[df_grado["pct_on_above"].idxmax(), "Grade"] if (df_grado is not None and not df_grado.empty and "pct_on_above" in df_grado.columns) else "N/A"
+        kpi_card("MEJOR GRADO", f"{mejor_grado}", "Mayor % On/Above grade", estado="ok" if mejor_grado != "N/A" else "warning")
 
     # ── Distribución de tiers ──────────────────────────────────────
     st.markdown("**Distribución por nivel de desempeño**")

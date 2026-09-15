@@ -46,13 +46,13 @@ except FileNotFoundError:
 from src.logic.auth import require_login
 require_login("Misiones")
 
-from src.logic.data_loader import init_session_state
-init_session_state()
-
 campus = CAMPUS["misiones"]
 
 # Sidebar
 ciclo_seleccionado = render_sidebar(sede_name="Misiones")
+
+from src.logic.data_loader import init_session_state
+init_session_state(ciclo_seleccionado)
 
 # Header
 st.markdown(
@@ -68,17 +68,17 @@ st.markdown(
 )
 
 # Carga de datos localizados
-df_asistencia, df_academico, df_asistencia_prev, df_academico_prev = load_global_data()
-df_acad_hist = load_academico_bloques()
+df_asistencia, df_academico, df_asistencia_prev, df_academico_prev = load_global_data(ciclo_seleccionado)
+df_acad_hist = load_academico_bloques(ciclo_seleccionado)
 
 # Integrar datos reales de session_state si existen
-df_clima_global = st.session_state.get("clima_data_global", load_clima_heatmap())
+df_clima_global = st.session_state.get("clima_data_global", load_clima_heatmap(ciclo_seleccionado))
 
-df_casos_global, df_cartas_global = load_disciplina_data()
+df_casos_global, df_cartas_global = load_disciplina_data(ciclo_seleccionado)
 df_casos_global = st.session_state.get("disciplina_casos", df_casos_global)
 df_cartas_global = st.session_state.get("disciplina_cartas", df_cartas_global)
 
-df_apps_kpis, df_correlacion = load_apps_data()
+df_apps_kpis, df_correlacion = load_apps_data(ciclo_seleccionado)
 df_apps_kpis = st.session_state.get("practica_apps_kpis", df_apps_kpis)
 df_correlacion = st.session_state.get("practica_correlacion", df_correlacion)
 
@@ -101,8 +101,6 @@ if clave_asis in st.session_state:
     df_asistencia.loc[df_asistencia["campus"] == sede_actual, "staff_asistencia"] = res_ast["staff"]
 
 # Ajuste dinámico de ciclo escolar
-
-
 df_ast_cycle, df_aca_cycle, df_ast_prev_cycle, df_aca_prev_cycle = obtener_datos_por_ciclo(
     ciclo_seleccionado, df_asistencia, df_academico, df_asistencia_prev, df_academico_prev
 )
@@ -148,7 +146,7 @@ with tab1:
         kpis_reales = calcular_kpis_ejecutivos(st.session_state[clave_datos])
     else:
         from src.logic.data_loader import get_academic_history_catalog
-        catalog = get_academic_history_catalog()
+        catalog = get_academic_history_catalog(ciclo_seleccionado)
         if sede_actual in catalog and catalog[sede_actual]:
             def _sort_b(b):
                 s = str(b).upper().strip()
@@ -171,7 +169,7 @@ with tab1:
 
     if asis_val is None or pd.isna(asis_val):
         from src.logic.data_loader import reconstruct_attendance_state
-        state_data = reconstruct_attendance_state(sede_actual)
+        state_data = reconstruct_attendance_state(sede_actual, ciclo_seleccionado)
         if state_data and "niveles" in state_data and isinstance(state_data["niveles"], pd.DataFrame) and not state_data["niveles"].empty:
             st.session_state[clave_asis] = state_data
             asis_val = float(state_data["niveles"]["Asistencia"].mean())

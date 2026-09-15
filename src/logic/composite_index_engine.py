@@ -20,12 +20,32 @@ BIMESTRE_LABELS = {
     "B5": "B5 (May-Jun)"
 }
 
-def generar_datos_indice_compuesto(df_master: pd.DataFrame = None) -> tuple[pd.DataFrame, dict]:
+def generar_datos_indice_compuesto(df_master: pd.DataFrame = None, ciclo_escolar: str = "2025 - 2026") -> tuple[pd.DataFrame, dict]:
     """
     Genera y calcula el Índice Compuesto Institucional para Misiones, Nuevo Sur, San Agustín y Global.
     Fórmula: (Calificaciones % * 0.50) + (IXL % * 0.30) + (Progrentis % * 0.20)
     Soporta bimestres reales (B1-B3) y proyecciones punteadas (B4-B5).
     """
+    if df_master is not None and not df_master.empty and "ciclo_escolar" in df_master.columns:
+        df_master = df_master[df_master["ciclo_escolar"] == ciclo_escolar]
+
+    has_data = (df_master is not None and not df_master.empty) or (ciclo_escolar == "2025 - 2026")
+
+    if not has_data:
+        df_empty = pd.DataFrame(columns=["campus", "bimestre", "bimestre_label", "indice", "tipo"])
+        empty_status = {
+            c: {
+                "indice_actual": 0.0,
+                "indice_b5": 0.0,
+                "global_b3": 0.0,
+                "diff": 0.0,
+                "estado": "info",
+                "color_hex": "#94a3b8",
+                "motivo": "Sin datos"
+            } for c in list(MATRICULA_CAMPUS.keys()) + ["Global"]
+        }
+        return df_empty, empty_status
+
     # Datos canónicos históricos por campus (B1, B2, B3)
     raw_data = {
         "Misiones": [

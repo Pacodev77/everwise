@@ -20,21 +20,37 @@ def render_cycle_comparison(df_asistencia_actual, df_academico_actual,
     st.markdown("### Análisis Histórico y Plan de Acción Ejecutivo")
     st.caption("Comparativa de Dominio Académico por Bimestre (Promedio GPA %)")
 
-    # ── Leer historial real acumulado ───────────────────────────────
+    # ── Leer historial real acumulado desde session_state y SQLite ──────
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    from src.logic.data_loader import get_academic_history_catalog
+    from src.logic.academic_processor import calcular_dominio_academico
+
+    catalog = get_academic_history_catalog(ciclo_activo)
+
+    historial = {}
     if sede_actual == "Global":
         campus_keys = ["Misiones", "Nuevo Sur", "San Agustín"]
-        historial = {}
         for bim in ORDEN_BIMESTRES:
             b_vals = []
             for c in campus_keys:
                 c_hist = st.session_state.get(f"historial_bimestres_{c}", {})
                 if bim in c_hist:
                     b_vals.append(c_hist[bim])
+                elif c in catalog and bim in catalog[c]:
+                    df_raw_b = catalog[c][bim].get("df_raw")
+                    dom_val = calcular_dominio_academico(df_raw_b)
+                    b_vals.append(dom_val)
             if b_vals:
                 historial[bim] = sum(b_vals) / len(b_vals)
     else:
         clave_hist = f"historial_bimestres_{sede_actual}" if sede_actual else None
-        historial  = st.session_state.get(clave_hist, {}) if clave_hist else {}
+        historial = st.session_state.get(clave_hist, {}).copy() if clave_hist else {}
+
+        if sede_actual in catalog:
+            for bim, b_data in catalog[sede_actual].items():
+                if bim not in historial:
+                    df_raw_b = b_data.get("df_raw")
+                    historial[bim] = calcular_dominio_academico(df_raw_b)
 
     if historial:
         # Construir DataFrame desde datos reales subidos

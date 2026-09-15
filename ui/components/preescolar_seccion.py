@@ -84,25 +84,29 @@ def render_preescolar_section(sede_actual: str):
             except Exception as e:
                 st.error(f"Error al procesar el archivo de Preescolar: {e}")
 
-    # Cargar datos desde session_state, SQLite o Semilla Canónica
+    # Cargar datos desde session_state, SQLite o Semilla Canónica para el ciclo activo
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
     df_global = st.session_state.get("preescolar_qualitative_data")
     if df_global is None or df_global.empty:
-        df_db = load_preescolar_data()
+        df_db = load_preescolar_data(ciclo_activo)
         if not df_db.empty:
             df_global = df_db
-        else:
+        elif ciclo_activo == "2025 - 2026":
             df_global = generar_datos_semilla_preescolar()
-        st.session_state["preescolar_qualitative_data"] = df_global
+            st.session_state["preescolar_qualitative_data"] = df_global
+        else:
+            df_global = pd.DataFrame()
 
-    if sede_actual != "Global":
-        df_view = df_global[df_global["campus"] == sede_actual] if "campus" in df_global.columns else df_global
-    else:
-        df_view = df_global
+    df_view = pd.DataFrame()
+    if df_global is not None and not df_global.empty:
+        if sede_actual != "Global":
+            df_view = df_global[df_global["campus"] == sede_actual] if "campus" in df_global.columns else df_global
+        else:
+            df_view = df_global
 
     if df_view.empty:
-        df_view = generar_datos_semilla_preescolar()
-        if sede_actual != "Global":
-            df_view = df_view[df_view["campus"] == sede_actual]
+        st.info(f"No hay reportes cualitativos de Preescolar registrados para el Ciclo Escolar {ciclo_activo} en {sede_actual}.")
+        return
 
     metrics = calcular_metricas_preescolar(df_view)
 
@@ -194,11 +198,3 @@ def render_preescolar_section(sede_actual: str):
         cols_bita_ex = [c for c in cols_bita if c in df_f.columns]
         st.dataframe(df_f[cols_bita_ex], hide_index=True, use_container_width=True)
 
-    # 4. Lectura Ejecutiva
-    lecturas = {
-        "Misiones": "Preescolar en Misiones demuestra un sólido nivel de consolidación en Desarrollo Socioemocional (78% Logrado), con oportunidades de refuerzo en pensamiento matemático temprano.",
-        "Nuevo Sur": "Nuevo Sur destaca por una alta tasa de madurez autónoma en K2 y K3, con un 82% de logros alcanzados sin requerir acompañamiento directo.",
-        "San Agustín": "San Agustín registra excelente avance cualitativo en Lenguaje y Comunicación y autorregulación, manteniendo un grupo reducido en proceso de nivelación inicial.",
-        "Global": "A nivel institucional, Preescolar presenta un 76% de nivel Logrado en sus 3 dimensiones fundamentales de desarrollo infantil."
-    }
-    st.info(f"**Lectura ejecutiva:** {lecturas.get(sede_actual, lecturas['Global'])}")

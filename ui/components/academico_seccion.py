@@ -12,6 +12,7 @@ from src.logic.academic_processor import (
     calcular_color_nivel,
     _categorizar_alumno,
 )
+from ui.components.kpi_cards import kpi_card
 
 def render_academico_section(sede_actual: str):
     tab_ps, tab_pre = st.tabs(["Primaria y Secundaria (GPA %)", "Preescolar (Cualitativo)"])
@@ -65,7 +66,8 @@ def render_academico_section(sede_actual: str):
 
         # ── Recopilar catálogo histórico de bimestres disponibles para este campus ──
         from src.logic.data_loader import get_academic_history_catalog, delete_academic_data
-        catalog = get_academic_history_catalog()
+        ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+        catalog = get_academic_history_catalog(ciclo_activo)
         bimestres_map = {}
 
         # 1. Desde SQLite
@@ -82,7 +84,7 @@ def render_academico_section(sede_actual: str):
                     bimestres_map[b_name] = val
 
         if not bimestres_map and clave_estado not in st.session_state:
-            st.info("Sube el archivo de calificaciones para ver el desempeño académico.")
+            st.info(f"Sube el archivo de calificaciones para el Ciclo Escolar {ciclo_activo} en {sede_actual} para ver el desempeño académico.")
         else:
             # Ordenar los bimestres numéricamente (B1, B2, B3, B4, B5...)
             def _sort_bim_key(b):
@@ -171,18 +173,33 @@ def render_academico_section(sede_actual: str):
                 if "pct_desempeno" in df_des.columns:
                     df_des["Color"] = df_des["pct_desempeno"].apply(calcular_color_nivel)
 
-                k1, k2, k3 = st.columns(3)
+                k1, k2, k3 = st.columns(3, gap="medium")
                 with k1:
-                    st.metric("Total alumnos", total)
+                    kpi_card(
+                        titulo="TOTAL ALUMNOS",
+                        valor=f"{total}",
+                        delta=f"Matrícula evaluada en Bimestre {bimestre}",
+                        estado="info"
+                    )
                 with k2:
-                    st.metric("Tasa de Alumnos en Nivel Óptimo (≥8.0 en todas)", f"{pct_global}%",
-                              delta=f"Bimestre {bimestre}")
+                    estado_tasa = "ok" if pct_global >= 80.0 else ("warning" if pct_global >= 60.0 else "risk")
+                    kpi_card(
+                        titulo="TASA DE ALUMNOS EN NIVEL ÓPTIMO",
+                        valor=f"{pct_global:.1f}%",
+                        delta=f"↑ Bimestre {bimestre} (≥8.0 en todas)",
+                        estado=estado_tasa
+                    )
                 with k3:
                     if not df_des.empty and "pct_desempeno" in df_des.columns and "Nivel" in df_des.columns:
                         mejor_nivel = df_des.loc[df_des["pct_desempeno"].idxmax(), "Nivel"]
                     else:
                         mejor_nivel = "N/A"
-                    st.metric("Mejor nivel", mejor_nivel)
+                    kpi_card(
+                        titulo="MEJOR NIVEL",
+                        valor=f"{mejor_nivel}",
+                        delta=f"Líder en desempeño académico",
+                        estado="ok" if mejor_nivel != "N/A" else "warning"
+                    )
 
                 # ── Distribución de categorías ────────────────────────────────────
                 st.markdown("**Distribución por nivel de desempeño**")

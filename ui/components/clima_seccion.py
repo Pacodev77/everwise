@@ -104,29 +104,23 @@ def render_clima_section(sede_actual: str):
             except Exception as e:
                 st.error(f"Error al procesar el archivo de Clima Escolar: {e}")
 
-    # Obtener datos de session_state, SQLite o Semilla Canónica
-    df_clima_global = st.session_state.get("clima_data_global", load_clima_heatmap())
-    if df_clima_global.empty:
-        df_clima_global = generar_datos_semilla_clima()
-        st.session_state["clima_data_global"] = df_clima_global
+    # Obtener datos de session_state o SQLite para el ciclo activo
+    ciclo_activo = st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    df_clima_global = st.session_state.get("clima_data_global")
+    if df_clima_global is None or df_clima_global.empty:
+        df_clima_global = load_clima_heatmap(ciclo_activo)
+        if (df_clima_global is None or df_clima_global.empty) and ciclo_activo == "2025 - 2026":
+            df_clima_global = generar_datos_semilla_clima()
+            st.session_state["clima_data_global"] = df_clima_global
 
-    df_clima = df_clima_global if sede_actual == "Global" else df_clima_global[df_clima_global['campus'] == sede_actual]
+    df_clima = pd.DataFrame()
+    if df_clima_global is not None and not df_clima_global.empty:
+        df_clima = df_clima_global if sede_actual == "Global" else df_clima_global[df_clima_global['campus'] == sede_actual]
 
-    if df_clima.empty:
-        df_clima = generar_datos_semilla_clima()
-        if sede_actual != "Global":
-            df_clima = df_clima[df_clima['campus'] == sede_actual]
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.altair_chart(chart_clima_heatmap(df_clima), use_container_width=True)
-    st.markdown("### Distribución de Respuestas")
-    st.altair_chart(chart_clima_barras(df_clima), use_container_width=True)
-    
-    lecturas = {
-        "Misiones": "El clima escolar en Misiones es altamente positivo en Sentido de Pertenencia (80%) y Seguridad Física (88%). Se sugiere monitorear el estrés acumulado.",
-        "Nuevo Sur": "Nuevo Sur destaca por una alta motivación de la comunidad escolar (78%) y niveles óptimos de seguridad emocional.",
-        "San Agustín": "San Agustín registra excelente clima institucional con baja incidencia de factores de riesgo en el aula.",
-        "Global": "La visión global refleja una percepción institucional altamente favorable con 85%+ de respuesta positiva en seguridad y pertenencia."
-    }
-    lectura_txt = lecturas.get(sede_actual, lecturas["Global"])
-    st.info(f"**Lectura ejecutiva:** {lectura_txt}")
+    if not df_clima.empty:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.altair_chart(chart_clima_heatmap(df_clima), use_container_width=True)
+        st.markdown("### Distribución de Respuestas")
+        st.altair_chart(chart_clima_barras(df_clima), use_container_width=True)
+    else:
+        st.info(f"No hay reportes de Clima Escolar registrados para el Ciclo Escolar {ciclo_activo} en {sede_actual}.")

@@ -4,7 +4,7 @@ import pandas as pd
 from src.logic.composite_index_engine import generar_datos_indice_compuesto
 from ui.charts.nuevos_graficos import chart_comparativa_indice_compuesto
 
-def render_comparativa_global_section(df_master: pd.DataFrame = None):
+def render_comparativa_global_section(df_master: pd.DataFrame = None, ciclo_escolar: str = "2025 - 2026"):
     """
     Renders the executive multi-campus comparative section featuring:
     - Composite Index cards with status indicators
@@ -16,7 +16,7 @@ def render_comparativa_global_section(df_master: pd.DataFrame = None):
     st.caption("Métrica ejecutiva integral ponderada: Calificaciones Académicas (50%) + Dominio IXL (30%) + Avance Progrentis (20%). Metas institucionales y proyecciones al Bimestre 5.")
 
     # Generar datos del índice compuesto
-    df_res, resumen_status = generar_datos_indice_compuesto(df_master)
+    df_res, resumen_status = generar_datos_indice_compuesto(df_master, ciclo_escolar=ciclo_escolar)
 
     # 1. Render KPI Summary Cards per Campus
     cols = st.columns(4)
@@ -63,18 +63,10 @@ def render_comparativa_global_section(df_master: pd.DataFrame = None):
             """
             st.markdown(card_html, unsafe_allow_html=True)
 
-    # 2. Render Line Chart
-    chart = chart_comparativa_indice_compuesto(df_res)
-    st.altair_chart(chart, use_container_width=True)
+    # 2. Render Line Chart if data exists
+    if not df_res.empty:
+        chart = chart_comparativa_indice_compuesto(df_res)
+        st.altair_chart(chart, use_container_width=True)
+    else:
+        st.info(f"Sin historial de Índice Compuesto registrado para el Ciclo Escolar {ciclo_escolar}.")
 
-    # 3. Executive Notes & Action Highlights
-    st.markdown("""
-    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin-top: 10px;">
-        <h5 style="margin-top:0; color:#0f172a; font-size:14px; font-weight:bold;">Diagnóstico Ejecutivo & Hallazgos Clave</h5>
-        <ul style="margin-bottom:0; padding-left:20px; font-size:13px; color:#334155;">
-            <li><strong>Misiones (87.2% actual, 90.7% proj B5):</strong> Mantiene el liderazgo operativo superando la meta de 85% de forma continua desde B2.</li>
-            <li><strong>Nuevo Sur (85.2% actual, 87.7% proj B5):</strong> Tendencia ascendente consistente; alcanza y consolida la meta institucional en B3.</li>
-            <li><strong>San Agustín (78.3% actual, 80.6% proj B5 - <span style="color:#dc2626; font-weight:bold;">Alerta Roja</span>):</strong> Se encuentra 7.1 pts debajo del promedio Global (85.4%) y su proyección móvil al B5 (80.6%) no alcanza la meta del 85%. Requiere plan intensivo de aceleración en materias académicas clave e IXL.</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)

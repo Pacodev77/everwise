@@ -49,33 +49,29 @@ from src.logic.auth import require_login
 require_login("General")
 
 # ======================================================
-# 2. LÓGICA DE DATOS
+# 2. SIDEBAR (NAVEGACIÓN Y CONFIGURACIÓN)
+# ======================================================
+ciclo_seleccionado = render_sidebar(sede_name=None)
+
+# ======================================================
+# 3. LÓGICA DE DATOS
 # ======================================================
 from src.logic.data_loader import init_session_state
-init_session_state()
+init_session_state(ciclo_seleccionado)
 
-df_asistencia, df_academico, df_asistencia_prev, df_academico_prev = load_global_data()
-df_apps_kpis, df_correlacion = load_apps_data()
-df_acad_hist = load_academico_bloques()
-df_clima = load_clima_heatmap()
+df_asistencia, df_academico, df_asistencia_prev, df_academico_prev = load_global_data(ciclo_seleccionado)
+df_apps_kpis, df_correlacion = load_apps_data(ciclo_seleccionado)
+df_acad_hist = load_academico_bloques(ciclo_seleccionado)
+df_clima = load_clima_heatmap(ciclo_seleccionado)
 
 # Integrar datos reales de session_state si existen
 df_clima_global_agg = st.session_state.get("clima_data_global", df_clima)
-df_casos, df_cartas = load_disciplina_data()
+df_casos, df_cartas = load_disciplina_data(ciclo_seleccionado)
 df_casos = st.session_state.get("disciplina_casos", df_casos)
 df_cartas = st.session_state.get("disciplina_cartas", df_cartas)
 
 df_apps_kpis_global = st.session_state.get("practica_apps_kpis", df_apps_kpis)
 df_correlacion = st.session_state.get("practica_correlacion", df_correlacion)
-
-# ======================================================
-# 3. SIDEBAR (NAVEGACIÓN Y CONFIGURACIÓN)
-# ======================================================
-
-ciclo_seleccionado = render_sidebar(sede_name=None)
-df_asistencia, df_academico, df_asistencia_prev, df_academico_prev = obtener_datos_por_ciclo(
-    ciclo_seleccionado, df_asistencia, df_academico, df_asistencia_prev, df_academico_prev
-)
 
 # ======================================================
 # 4. CONTENIDO PRINCIPAL
@@ -178,7 +174,7 @@ with tab1:
         state_key = f"asistencia_data_{c}"
         if state_key not in st.session_state:
             from src.logic.data_loader import reconstruct_attendance_state
-            state_data = reconstruct_attendance_state(c)
+            state_data = reconstruct_attendance_state(c, ciclo_seleccionado)
             if state_data:
                 st.session_state[state_key] = state_data
 
@@ -226,7 +222,7 @@ with tab1:
         
     # Comparativa Global Multicampus (Índice Compuesto)
     from ui.components.comparativa_global_seccion import render_comparativa_global_section
-    render_comparativa_global_section(df_academico)
+    render_comparativa_global_section(df_academico, ciclo_escolar=ciclo_seleccionado)
 
     # Análisis Histórico
     render_cycle_comparison(df_asistencia, df_academico, df_asistencia_prev, df_academico_prev, "Global")
@@ -258,7 +254,7 @@ with tab7:
     st.markdown("### Bitácora de Auditoría y Trazabilidad CRM")
     st.caption("Registro inmutable de acciones, cargas de archivos y modificaciones realizadas por usuarios.")
     
-    df_audit = get_recent_audit_logs(limit=100)
+    df_audit = get_recent_audit_logs(limit=100, ciclo_escolar=ciclo_seleccionado)
     
     if not df_audit.empty:
         col_f1, col_f2, col_f3 = st.columns([2, 2, 1.5])
@@ -287,7 +283,7 @@ with tab7:
             
         st.dataframe(df_audit_view, hide_index=True, use_container_width=True)
     else:
-        st.info("No hay eventos registrados en la bitácora aún.")
+        st.info(f"No hay eventos registrados en la bitácora para el Ciclo Escolar {ciclo_seleccionado} aún.")
 
 # Footer
 render_footer(ciclo_seleccionado)
