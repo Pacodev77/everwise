@@ -91,8 +91,10 @@ def init_attendance_tables():
 init_audit_table()
 init_attendance_tables()
 
-def reconstruct_attendance_state(campus):
+def reconstruct_attendance_state(campus, ciclo_escolar=None):
     """Reconstruye el estado completo de asistencia de un campus desde la base de datos."""
+    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
+    ensure_schema_has_ciclo_escolar()
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -101,9 +103,9 @@ def reconstruct_attendance_state(campus):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='normalized_attendance'")
         if cursor.fetchone():
             df_canon = pd.read_sql(
-                "SELECT * FROM normalized_attendance WHERE campus = ?", 
+                "SELECT * FROM normalized_attendance WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", 
                 conn, 
-                params=(campus,)
+                params=(campus, ciclo, ciclo)
             )
             if not df_canon.empty:
                 # Parsear fechas
@@ -202,9 +204,9 @@ def reconstruct_attendance_state(campus):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resumen_diario_nivel'")
         if cursor.fetchone():
             df_res = pd.read_sql(
-                "SELECT * FROM resumen_diario_nivel WHERE campus = ?", 
+                "SELECT * FROM resumen_diario_nivel WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", 
                 conn, 
-                params=(campus,)
+                params=(campus, ciclo, ciclo)
             )
             if not df_res.empty:
                 df_res['fecha'] = pd.to_datetime(df_res['fecha']).dt.date
@@ -263,12 +265,17 @@ def reconstruct_attendance_state(campus):
         # 3. Fallback a la tabla heredada
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
         if cursor.fetchone():
-            df_ast = pd.read_sql("SELECT * FROM attendance_data WHERE campus = ?", conn, params=(campus,))
+            df_ast = pd.read_sql(
+                "SELECT * FROM attendance_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", 
+                conn, 
+                params=(campus, ciclo, ciclo)
+            )
             if not df_ast.empty:
                 staff_val = df_ast["staff_asistencia"].iloc[0] if "staff_asistencia" in df_ast.columns else 0.85
                 if pd.isna(staff_val): staff_val = 0.85
+                cols_niv = [c for c in ["Nivel", "Asistencia", "Distribución"] if c in df_ast.columns]
                 return {
-                    "niveles": df_ast[["Nivel", "Asistencia", "Distribución"]].copy(),
+                    "niveles": df_ast[cols_niv].copy(),
                     "staff": float(staff_val)
                 }
         return None
@@ -641,29 +648,6 @@ def delete_attendance_data(campus, ciclo_escolar=None):
     finally:
         conn.close()
 
-def reconstruct_attendance_state(campus, ciclo_escolar=None):
-    ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
-    if not os.path.exists(DB_PATH):
-        return None
-    ensure_schema_has_ciclo_escolar()
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_data'")
-        if cursor.fetchone():
-            df_att = pd.read_sql("SELECT * FROM attendance_data WHERE campus = ? AND (ciclo_escolar = ? OR (ciclo_escolar IS NULL AND ? = '2025 - 2026'))", conn, params=(campus, ciclo, ciclo))
-            if not df_att.empty:
-                staff_val = df_att["staff_asistencia"].iloc[0] if "staff_asistencia" in df_att.columns else 0.85
-                cols_niv = [c for c in ["Nivel", "Asistencia"] if c in df_att.columns]
-                return {
-                    "niveles": df_att[cols_niv],
-                    "staff": float(staff_val)
-                }
-        return None
-    except Exception:
-        return None
-    finally:
-        conn.close()
 
 def save_clima_data(df_clima, ciclo_escolar=None):
     ciclo = ciclo_escolar or st.session_state.get("ciclo_escolar_activo", "2025 - 2026")
